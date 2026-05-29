@@ -15,7 +15,7 @@ import {
   XCircle
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { getCasePacket } from "./domain/casePacket";
+import { getCasePacket, getPacketDocumentReadiness, searchPriceMasterItems } from "./domain/casePacket";
 import { getCaseDetail } from "./domain/caseDetail";
 import { addCaseNote, addPriceMasterItemToCasePacket, attachDocumentFile, updateAmountCheck, updateCasePacketItemQuantity, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
@@ -735,30 +735,47 @@ function DocumentWorkspace({
   onAddPriceMasterItem: (item: PriceMasterItem) => void;
   onQuantityChange: (itemId: string, quantity: number) => void;
 }) {
-  const selectableItems = priceMaster.slice(0, 80);
+  const [priceQuery, setPriceQuery] = useState("");
+  const selectableItems = useMemo(() => searchPriceMasterItems(priceMaster, priceQuery, 12), [priceMaster, priceQuery]);
+  const readiness = useMemo(() => getPacketDocumentReadiness(packet), [packet]);
 
   return (
     <div className="workspace-panel">
       <div className="workspace-actions">
-        <select
-          aria-label="Add price master item"
-          defaultValue=""
+        <input
+          aria-label="Search price master"
           disabled={priceMaster.length === 0}
-          onChange={(event) => {
-            const selected = priceMaster.find((item) => getPriceMasterOptionValue(item) === event.target.value);
-            if (selected) {
-              onAddPriceMasterItem(selected);
-              event.target.value = "";
-            }
-          }}
-        >
-          <option value="">{priceMaster.length > 0 ? "Add work item from Price Master" : "Import Price Master first"}</option>
-          {selectableItems.map((item) => (
-            <option key={getPriceMasterOptionValue(item)} value={getPriceMasterOptionValue(item)}>
-              {item.diyCode} - {item.description}
-            </option>
-          ))}
-        </select>
+          placeholder={priceMaster.length > 0 ? "Search code, description, sheet" : "Import Price Master first"}
+          value={priceQuery}
+          onChange={(event) => setPriceQuery(event.target.value)}
+        />
+        <div className="price-search-list">
+          {selectableItems.length > 0 ? selectableItems.map((item) => (
+            <button
+              key={getPriceMasterOptionValue(item)}
+              type="button"
+              onClick={() => {
+                onAddPriceMasterItem(item);
+                setPriceQuery("");
+              }}
+            >
+              <strong>{item.diyCode}</strong>
+              <span>{item.description}</span>
+              <em>{item.totalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</em>
+            </button>
+          )) : (
+            <p className="muted">No matching price master item.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="document-readiness">
+        {readiness.map((item) => (
+          <div className={`readiness-card readiness-${item.status}`} key={item.label}>
+            <strong>{item.label}</strong>
+            <span>{item.message}</span>
+          </div>
+        ))}
       </div>
 
       <div className="packet-table">

@@ -50,6 +50,12 @@ export type CasePacket = {
   grandTotal: number;
 };
 
+export type PacketDocumentReadiness = {
+  label: "Job Detail" | "Quotation" | "PO";
+  status: "ready" | "review" | "blocked";
+  message: string;
+};
+
 export type AppWorkData = {
   jobDetail: DocumentStatus;
   quotation: DocumentStatus;

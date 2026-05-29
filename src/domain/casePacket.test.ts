@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addPacketItemFromPriceMaster, createEmptyCasePacket, getCasePacket, updatePacketItemQuantity } from "./casePacket";
+import {
+  addPacketItemFromPriceMaster,
+  createEmptyCasePacket,
+  getCasePacket,
+  getPacketDocumentReadiness,
+  searchPriceMasterItems,
+  updatePacketItemQuantity
+} from "./casePacket";
 import type { AppWorkData, PriceMasterItem } from "./types";
 
 describe("case packet", () => {
@@ -43,6 +50,34 @@ describe("case packet", () => {
     const second = addPacketItemFromPriceMaster(first, makePriceMasterItem());
 
     expect(second.items[0].id).not.toBe(second.items[1].id);
+  });
+
+  it("searches price master items by code, description and sheet", () => {
+    const items = [
+      makePriceMasterItem(),
+      { ...makePriceMasterItem(), sourceSheet: "Air2026", diyCode: "AC 2.1", description: "Clean cassette air conditioner" }
+    ];
+
+    expect(searchPriceMasterItems(items, "lp panel")).toEqual([items[0]]);
+    expect(searchPriceMasterItems(items, "AC 2.1")).toEqual([items[1]]);
+    expect(searchPriceMasterItems(items, "air2026")).toEqual([items[1]]);
+    expect(searchPriceMasterItems(items, "")).toEqual(items);
+  });
+
+  it("summarizes document readiness from packet completeness", () => {
+    const empty = getPacketDocumentReadiness(createEmptyCasePacket());
+    const packet = addPacketItemFromPriceMaster(createEmptyCasePacket(), makePriceMasterItem());
+
+    expect(empty).toEqual([
+      { label: "Job Detail", status: "blocked", message: "Add at least one work item." },
+      { label: "Quotation", status: "blocked", message: "Add at least one work item." },
+      { label: "PO", status: "blocked", message: "Add at least one work item." }
+    ]);
+    expect(getPacketDocumentReadiness(packet)).toEqual([
+      { label: "Job Detail", status: "ready", message: "Ready to draft from 1 work item." },
+      { label: "Quotation", status: "ready", message: "Ready to draft from price-matched items." },
+      { label: "PO", status: "ready", message: "Ready with total 19,378.13 including VAT." }
+    ]);
   });
 });
 
