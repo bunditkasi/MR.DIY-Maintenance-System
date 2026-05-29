@@ -616,6 +616,48 @@ tbody tr:hover,
   font-weight: 700;
 }
 
+.note-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 8px;
+}
+
+.note-form input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #182033;
+}
+
+.note-form button {
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+  background: #1f5eff;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.note-list {
+  display: grid;
+  gap: 6px;
+}
+
+.note-row {
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  background: #fbfcff;
+  color: #182033;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+}
+
 .alert-row {
   color: #8a4b00;
   background: #fffbeb;

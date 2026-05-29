@@ -55,3 +55,34 @@ export function updateAmountCheck(
 
   return changed ? nextCases : cases;
 }
+
+export function addCaseNote(
+  cases: MaintenanceCase[],
+  ticketNo: string,
+  note: string,
+  updatedAt: string = new Date().toISOString()
+): MaintenanceCase[] {
+  const trimmedNote = note.trim();
+  if (!trimmedNote) {
+    return cases;
+  }
+
+  let changed = false;
+  const nextCases = cases.map((item) => {
+    if (item.ticketNo !== ticketNo) {
+      return item;
+    }
+
+    changed = true;
+    return {
+      ...item,
+      updatedAt,
+      appWork: {
+        ...item.appWork,
+        notes: [trimmedNote, ...item.appWork.notes]
+      }
+    };
+  });
+
+  return changed ? nextCases : cases;
+}

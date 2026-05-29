@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateAmountCheck, updateDocumentStatus } from "./caseWorkflow";
+import { addCaseNote, updateAmountCheck, updateDocumentStatus } from "./caseWorkflow";
 import type { MaintenanceCase } from "./types";
 
 describe("updateDocumentStatus", () => {
@@ -31,6 +31,25 @@ describe("updateAmountCheck", () => {
     expect(result[0].appWork.po).toBe("validated");
     expect(result[0].updatedAt).toBe("2026-05-29T13:00:00.000Z");
     expect(result[1]).toBe(cases[1]);
+  });
+});
+
+describe("addCaseNote", () => {
+  it("adds a trimmed note to the selected ticket", () => {
+    const cases = [makeCase("L00055"), makeCase("L00056")];
+    cases[0].appWork.notes = ["Existing note"];
+
+    const result = addCaseNote(cases, "L00055", "  Waiting supplier revise QT  ", "2026-05-29T14:00:00.000Z");
+
+    expect(result[0].appWork.notes).toEqual(["Waiting supplier revise QT", "Existing note"]);
+    expect(result[0].updatedAt).toBe("2026-05-29T14:00:00.000Z");
+    expect(result[1]).toBe(cases[1]);
+  });
+
+  it("does not change cases when note is blank", () => {
+    const cases = [makeCase("L00055")];
+
+    expect(addCaseNote(cases, "L00055", "   ")).toBe(cases);
   });
 });
 

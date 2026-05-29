@@ -14,9 +14,9 @@ import {
   Upload,
   XCircle
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { getCaseDetail } from "./domain/caseDetail";
-import { updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
+import { addCaseNote, updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import { sampleCases } from "./domain/sampleData";
@@ -199,6 +199,24 @@ export default function App() {
     });
   }
 
+  function handleAddCaseNote(note: string) {
+    if (!selectedCase) {
+      return;
+    }
+
+    const nextCases = addCaseNote(cases, selectedCase.ticketNo, note);
+    if (nextCases === cases) {
+      return;
+    }
+
+    setCases(nextCases);
+    saveLocalState(nextCases, importHistory);
+    setPersistence({
+      status: "not_configured",
+      message: `Saved note for ${selectedCase.ticketNo} locally.`
+    });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -332,6 +350,7 @@ export default function App() {
               importResult={importResult}
               onDocumentStatusChange={handleDocumentStatusChange}
               onAmountCheckChange={handleAmountCheckChange}
+              onAddCaseNote={handleAddCaseNote}
             />
           ) : null}
         </div>
@@ -417,12 +436,14 @@ function CasePanel({
   item,
   importResult,
   onDocumentStatusChange,
-  onAmountCheckChange
+  onAmountCheckChange,
+  onAddCaseNote
 }: {
   item: MaintenanceCase;
   importResult: ImportResult | null;
   onDocumentStatusChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
   onAmountCheckChange: (status: AmountCheckStatus) => void;
+  onAddCaseNote: (note: string) => void;
 }) {
   const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
   const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
@@ -502,6 +523,8 @@ function CasePanel({
           <ValidationItem label="Price master match" status={item.appWork.amountCheck === "blocked" ? "blocked" : item.appWork.amountCheck === "warning" ? "review" : "passed"} />
         </div>
       </section>
+
+      <CaseNotes notes={item.appWork.notes} onAddCaseNote={onAddCaseNote} />
 
       <section className="panel-section">
         <h3>Latest CSV Changes</h3>
@@ -597,6 +620,48 @@ function ValidationItem({ label, status }: { label: string; status: "passed" | "
       <span>{label}</span>
       <strong>{status}</strong>
     </div>
+  );
+}
+
+function CaseNotes({
+  notes,
+  onAddCaseNote
+}: {
+  notes: string[];
+  onAddCaseNote: (note: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  function submitNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextNote = draft.trim();
+    if (!nextNote) {
+      return;
+    }
+    onAddCaseNote(nextNote);
+    setDraft("");
+  }
+
+  return (
+    <section className="panel-section">
+      <h3>Case Notes</h3>
+      <form className="note-form" onSubmit={submitNote}>
+        <input
+          aria-label="New case note"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder="Add follow-up note"
+        />
+        <button type="submit">Add</button>
+      </form>
+      <div className="note-list">
+        {notes.length > 0 ? notes.map((note, index) => (
+          <div className="note-row" key={`${note}-${index}`}>{note}</div>
+        )) : (
+          <p className="muted">No notes yet.</p>
+        )}
+      </div>
+    </section>
   );
 }
 
