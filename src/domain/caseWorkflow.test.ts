@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateDocumentStatus } from "./caseWorkflow";
+import { updateAmountCheck, updateDocumentStatus } from "./caseWorkflow";
 import type { MaintenanceCase } from "./types";
 
 describe("updateDocumentStatus", () => {
@@ -17,6 +17,20 @@ describe("updateDocumentStatus", () => {
     const cases = [makeCase("L00055")];
 
     expect(updateDocumentStatus(cases, "L99999", "po", "validated")).toBe(cases);
+  });
+});
+
+describe("updateAmountCheck", () => {
+  it("updates amount validation status without changing document statuses", () => {
+    const cases = [makeCase("L00055"), makeCase("L00056")];
+    cases[0].appWork.po = "validated";
+
+    const result = updateAmountCheck(cases, "L00055", "blocked", "2026-05-29T13:00:00.000Z");
+
+    expect(result[0].appWork.amountCheck).toBe("blocked");
+    expect(result[0].appWork.po).toBe("validated");
+    expect(result[0].updatedAt).toBe("2026-05-29T13:00:00.000Z");
+    expect(result[1]).toBe(cases[1]);
   });
 });
 

@@ -1,6 +1,7 @@
 import type { AppWorkData, DocumentStatus, MaintenanceCase } from "./types";
 
 export type DocumentKey = Extract<keyof AppWorkData, "jobDetail" | "quotation" | "po" | "invoice" | "archive">;
+export type AmountCheckStatus = AppWorkData["amountCheck"];
 
 export function updateDocumentStatus(
   cases: MaintenanceCase[],
@@ -22,6 +23,32 @@ export function updateDocumentStatus(
       appWork: {
         ...item.appWork,
         [documentKey]: status
+      }
+    };
+  });
+
+  return changed ? nextCases : cases;
+}
+
+export function updateAmountCheck(
+  cases: MaintenanceCase[],
+  ticketNo: string,
+  status: AmountCheckStatus,
+  updatedAt: string = new Date().toISOString()
+): MaintenanceCase[] {
+  let changed = false;
+  const nextCases = cases.map((item) => {
+    if (item.ticketNo !== ticketNo) {
+      return item;
+    }
+
+    changed = true;
+    return {
+      ...item,
+      updatedAt,
+      appWork: {
+        ...item.appWork,
+        amountCheck: status
       }
     };
   });

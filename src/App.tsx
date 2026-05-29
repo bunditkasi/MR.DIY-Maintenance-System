@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getCaseDetail } from "./domain/caseDetail";
-import { updateDocumentStatus, type DocumentKey } from "./domain/caseWorkflow";
+import { updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import { sampleCases } from "./domain/sampleData";
@@ -36,6 +36,7 @@ const documentLabels: Array<{ key: DocumentKey; label: string }> = [
 ];
 
 const documentStatusOptions: DocumentStatus[] = ["missing", "uploaded", "validated", "approved"];
+const amountCheckOptions: AmountCheckStatus[] = ["not_started", "passed", "warning", "blocked"];
 
 export default function App() {
   const initialBrowserState = getInitialBrowserState();
@@ -184,6 +185,20 @@ export default function App() {
     });
   }
 
+  function handleAmountCheckChange(status: AmountCheckStatus) {
+    if (!selectedCase) {
+      return;
+    }
+
+    const nextCases = updateAmountCheck(cases, selectedCase.ticketNo, status);
+    setCases(nextCases);
+    saveLocalState(nextCases, importHistory);
+    setPersistence({
+      status: "not_configured",
+      message: `Saved ${selectedCase.ticketNo} amount validation status locally.`
+    });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -316,6 +331,7 @@ export default function App() {
               item={selectedCase}
               importResult={importResult}
               onDocumentStatusChange={handleDocumentStatusChange}
+              onAmountCheckChange={handleAmountCheckChange}
             />
           ) : null}
         </div>
@@ -400,11 +416,13 @@ function formatDateTime(value: string): string {
 function CasePanel({
   item,
   importResult,
-  onDocumentStatusChange
+  onDocumentStatusChange,
+  onAmountCheckChange
 }: {
   item: MaintenanceCase;
   importResult: ImportResult | null;
   onDocumentStatusChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
+  onAmountCheckChange: (status: AmountCheckStatus) => void;
 }) {
   const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
   const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
@@ -466,10 +484,22 @@ function CasePanel({
 
       <section className="panel-section">
         <h3>Validation</h3>
+        <label className="validation-control">
+          <span>Amount validation</span>
+          <select
+            aria-label="Amount validation status"
+            value={item.appWork.amountCheck}
+            onChange={(event) => onAmountCheckChange(event.target.value as AmountCheckStatus)}
+          >
+            {amountCheckOptions.map((option) => (
+              <option key={option} value={option}>{option.replace("_", " ")}</option>
+            ))}
+          </select>
+        </label>
         <div className="validation-stack">
-          <ValidationItem label="Quotation total" status={item.appWork.amountCheck === "passed" ? "passed" : "review"} />
+          <ValidationItem label="Quotation total" status={item.appWork.amountCheck === "blocked" ? "blocked" : item.appWork.amountCheck === "passed" ? "passed" : "review"} />
           <ValidationItem label="VAT 7%" status={item.appWork.amountCheck === "blocked" ? "blocked" : "passed"} />
-          <ValidationItem label="Price master match" status={item.appWork.amountCheck === "warning" ? "review" : "passed"} />
+          <ValidationItem label="Price master match" status={item.appWork.amountCheck === "blocked" ? "blocked" : item.appWork.amountCheck === "warning" ? "review" : "passed"} />
         </div>
       </section>
 

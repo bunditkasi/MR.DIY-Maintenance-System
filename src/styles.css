@@ -586,6 +586,36 @@ tbody tr:hover,
   background: #fff1f2;
 }
 
+.validation-control {
+  min-height: 40px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #fbfcff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.validation-control span {
+  color: #465266;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.validation-control select {
+  margin-left: auto;
+  min-width: 124px;
+  height: 28px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #182033;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .alert-row {
   color: #8a4b00;
   background: #fffbeb;
