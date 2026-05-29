@@ -55,6 +55,29 @@ describe("parseCsv", () => {
     });
   });
 
+  it("parses the exported MTD Table header format from Lark", () => {
+    const csv = [
+      "\uFEFFTicket No.,Create date,L1 Senior,L2 Sup,Store Code-Name,Store Code,Store Full Name,Category,Ticket Status,Quotation number,PO",
+      "L00046,2025/11/09 12:45,Waritphon Aekbunyrit,ธนไพศาล,U141 PNRC,U141,Nong Bua Rawe,เพดาน (Ceiling),Done,QT6901005,POM2601083"
+    ].join("\n");
+
+    const result = parseCsv(csv);
+
+    expect(result.invalidRows).toEqual([]);
+    expect(result.rows[0]).toMatchObject({
+      ticketNo: "L00046",
+      storeCode: "U141",
+      storeName: "Nong Bua Rawe",
+      category: "เพดาน (Ceiling)",
+      status: "Done",
+      senior: "Waritphon Aekbunyrit",
+      supplier: "ธนไพศาล",
+      createdDate: "2025/11/09 12:45",
+      quotationNo: "QT6901005",
+      poNo: "POM2601083"
+    });
+  });
+
   it("reports rows without a ticket number as invalid", () => {
     const csv = [
       "Ticket No.,Store Code-name,Ticket Status",

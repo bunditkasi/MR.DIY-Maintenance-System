@@ -16,7 +16,9 @@ export type ParseCsvResult = {
 const FIELD_ALIASES = {
   ticketNo: ["Ticket No.", "Ticket", "Ticket No", "Ticket number"],
   recordId: ["Record ID", "record_id", "Lark Record ID"],
-  store: ["Store Code-name", "Store", "Department of Creator", "Store Code"],
+  store: ["Store Code-Name", "Store Code-name", "Store", "Department of Creator", "Store Code"],
+  storeCode: ["Store Code"],
+  storeName: ["Store Full Name"],
   status: ["Ticket Status", "Status"],
   senior: ["L1 Senior", "Senior", "Assigned Senior"],
   supplier: ["L2 Sup", "Supplier", "Suplier", "L2 Supplier"],
@@ -64,7 +66,9 @@ export function parseCsv(csvText: string): ParseCsvResult {
     }
 
     const storeValue = pick(raw, FIELD_ALIASES.store);
-    const { storeCode, storeName } = parseStore(storeValue);
+    const storeCodeValue = pick(raw, FIELD_ALIASES.storeCode);
+    const storeNameValue = pick(raw, FIELD_ALIASES.storeName);
+    const { storeCode, storeName } = parseStore(storeValue, storeCodeValue, storeNameValue);
 
     rows.push({
       ticketNo,
@@ -209,7 +213,7 @@ function detectConflicts(
 
 function toRawRow(headers: string[], values: string[]): Record<string, string> {
   return headers.reduce<Record<string, string>>((row, header, index) => {
-    row[header.trim()] = (values[index] ?? "").trim();
+    row[normalizeHeader(header)] = (values[index] ?? "").trim();
     return row;
   }, {});
 }
@@ -225,17 +229,41 @@ function pick(row: Record<string, string>, aliases: readonly string[]): string |
   return undefined;
 }
 
-function parseStore(value: string | undefined): { storeCode: string; storeName?: string } {
-  if (!value) {
+function normalizeHeader(header: string): string {
+  return header.replace(/^\uFEFF/, "").trim();
+}
+
+function parseStore(
+  combinedValue: string | undefined,
+  explicitStoreCode: string | undefined,
+  explicitStoreName: string | undefined
+): { storeCode: string; storeName?: string } {
+  if (explicitStoreCode) {
+    return {
+      storeCode: explicitStoreCode,
+      storeName: explicitStoreName || parseStoreNameFromCombined(combinedValue)
+    };
+  }
+
+  if (!combinedValue) {
     return { storeCode: "" };
   }
 
-  const [storeCode, ...nameParts] = value.trim().split(/\s+/);
+  const [storeCode, ...nameParts] = combinedValue.trim().split(/\s+/);
   const storeName = nameParts.join(" ").trim();
   return {
     storeCode,
-    storeName: storeName || undefined
+    storeName: explicitStoreName || storeName || undefined
   };
+}
+
+function parseStoreNameFromCombined(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const [, ...nameParts] = value.trim().split(/\s+/);
+  return nameParts.join(" ").trim() || undefined;
 }
 
 function parseCsvRecords(input: string): string[][] {
