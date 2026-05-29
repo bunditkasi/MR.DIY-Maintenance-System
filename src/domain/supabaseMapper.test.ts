@@ -30,6 +30,7 @@ const caseItem: MaintenanceCase = {
     invoice: "missing",
     archive: "uploaded",
     notes: ["Waiting invoice"],
+    documents: {},
     amountCheck: "passed"
   }
 };

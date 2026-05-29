@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { getCaseDetail } from "./domain/caseDetail";
-import { addCaseNote, updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
+import { addCaseNote, attachDocumentFile, updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import { sampleCases } from "./domain/sampleData";
@@ -217,6 +217,24 @@ export default function App() {
     });
   }
 
+  function handleDocumentFileAttach(documentKey: DocumentKey, file: File) {
+    if (!selectedCase) {
+      return;
+    }
+
+    const nextCases = attachDocumentFile(cases, selectedCase.ticketNo, documentKey, {
+      name: file.name,
+      size: file.size,
+      type: file.type || "application/octet-stream"
+    });
+    setCases(nextCases);
+    saveLocalState(nextCases, importHistory);
+    setPersistence({
+      status: "not_configured",
+      message: `Attached ${file.name} to ${selectedCase.ticketNo} locally.`
+    });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -351,6 +369,7 @@ export default function App() {
               onDocumentStatusChange={handleDocumentStatusChange}
               onAmountCheckChange={handleAmountCheckChange}
               onAddCaseNote={handleAddCaseNote}
+              onDocumentFileAttach={handleDocumentFileAttach}
             />
           ) : null}
         </div>
@@ -437,13 +456,15 @@ function CasePanel({
   importResult,
   onDocumentStatusChange,
   onAmountCheckChange,
-  onAddCaseNote
+  onAddCaseNote,
+  onDocumentFileAttach
 }: {
   item: MaintenanceCase;
   importResult: ImportResult | null;
   onDocumentStatusChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
   onAmountCheckChange: (status: AmountCheckStatus) => void;
   onAddCaseNote: (note: string) => void;
+  onDocumentFileAttach: (documentKey: DocumentKey, file: File) => void;
 }) {
   const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
   const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
@@ -497,7 +518,9 @@ function CasePanel({
               documentKey={key}
               label={label}
               status={item.appWork[key]}
+              files={item.appWork.documents?.[key] ?? []}
               onChange={onDocumentStatusChange}
+              onFileAttach={onDocumentFileAttach}
             />
           ))}
         </div>
@@ -587,29 +610,62 @@ function ChecklistRow({
   documentKey,
   label,
   status,
-  onChange
+  files,
+  onChange,
+  onFileAttach
 }: {
   documentKey: DocumentKey;
   label: string;
   status: DocumentStatus;
+  files: NonNullable<MaintenanceCase["appWork"]["documents"][DocumentKey]>;
   onChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
+  onFileAttach: (documentKey: DocumentKey, file: File) => void;
 }) {
   const done = status === "validated" || status === "approved";
   return (
     <div className="check-row">
-      {done ? <CheckCircle2 size={18} /> : status === "missing" ? <XCircle size={18} /> : <FileCheck2 size={18} />}
-      <span>{label}</span>
-      <select
-        aria-label={`${label} status`}
-        value={status}
-        onChange={(event) => onChange(documentKey, event.target.value as DocumentStatus)}
-      >
-        {documentStatusOptions.map((option) => (
-          <option key={option} value={option}>{option}</option>
-        ))}
-      </select>
+      <div className="check-main">
+        {done ? <CheckCircle2 size={18} /> : status === "missing" ? <XCircle size={18} /> : <FileCheck2 size={18} />}
+        <span>{label}</span>
+        <select
+          aria-label={`${label} status`}
+          value={status}
+          onChange={(event) => onChange(documentKey, event.target.value as DocumentStatus)}
+        >
+          {documentStatusOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </div>
+      <div className="file-row">
+        <label className="file-attach">
+          Attach
+          <input
+            aria-label={`Attach ${label} file`}
+            type="file"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) {
+                onFileAttach(documentKey, file);
+              }
+              event.target.value = "";
+            }}
+          />
+        </label>
+        <span>{files[0] ? `${files[0].name} (${formatFileSize(files[0].size)})` : "No file attached"}</span>
+      </div>
     </div>
   );
+}
+
+function formatFileSize(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function ValidationItem({ label, status }: { label: string; status: "passed" | "review" | "blocked" }) {

@@ -68,6 +68,7 @@ function makeCase(raw: Record<string, string>): MaintenanceCase {
       invoice: "missing",
       archive: "missing",
       notes: [],
+      documents: {},
       amountCheck: "not_started"
     }
   };

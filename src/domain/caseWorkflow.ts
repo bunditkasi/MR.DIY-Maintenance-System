@@ -86,3 +86,43 @@ export function addCaseNote(
 
   return changed ? nextCases : cases;
 }
+
+export function attachDocumentFile(
+  cases: MaintenanceCase[],
+  ticketNo: string,
+  documentKey: DocumentKey,
+  file: { name: string; size: number; type: string },
+  uploadedAt: string = new Date().toISOString()
+): MaintenanceCase[] {
+  let changed = false;
+  const fileMeta = {
+    id: `${documentKey}-${uploadedAt}-${file.name}`,
+    name: file.name,
+    size: file.size,
+    type: file.type,
+    uploadedAt
+  };
+
+  const nextCases = cases.map((item) => {
+    if (item.ticketNo !== ticketNo) {
+      return item;
+    }
+
+    changed = true;
+    const currentDocuments = item.appWork.documents ?? {};
+    return {
+      ...item,
+      updatedAt: uploadedAt,
+      appWork: {
+        ...item.appWork,
+        [documentKey]: "uploaded" as DocumentStatus,
+        documents: {
+          ...currentDocuments,
+          [documentKey]: [fileMeta, ...(currentDocuments[documentKey] ?? [])]
+        }
+      }
+    };
+  });
+
+  return changed ? nextCases : cases;
+}

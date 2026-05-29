@@ -15,6 +15,16 @@ export type LarkTicketSnapshot = {
 
 export type DocumentStatus = "missing" | "uploaded" | "validated" | "approved";
 
+export type DocumentFileMeta = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  uploadedAt: string;
+};
+
+export type DocumentFileMap = Partial<Record<"jobDetail" | "quotation" | "po" | "invoice" | "archive", DocumentFileMeta[]>>;
+
 export type AppWorkData = {
   jobDetail: DocumentStatus;
   quotation: DocumentStatus;
@@ -22,6 +32,7 @@ export type AppWorkData = {
   invoice: DocumentStatus;
   archive: DocumentStatus;
   notes: string[];
+  documents: DocumentFileMap;
   amountCheck: "not_started" | "passed" | "warning" | "blocked";
 };
 

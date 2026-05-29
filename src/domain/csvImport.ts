@@ -154,6 +154,7 @@ export function createDefaultWorkData(): AppWorkData {
     invoice: "missing",
     archive: "missing",
     notes: [],
+    documents: {},
     amountCheck: "not_started"
   };
 }

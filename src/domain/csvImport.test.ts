@@ -29,6 +29,7 @@ const existingCase: MaintenanceCase = {
     invoice: "missing",
     archive: "missing",
     notes: ["Job detail checked by Sr.Ex"],
+    documents: {},
     amountCheck: "warning"
   }
 };

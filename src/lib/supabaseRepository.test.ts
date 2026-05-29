@@ -174,6 +174,7 @@ function makeCase(ticketNo: string): MaintenanceCase {
       invoice: "missing",
       archive: "missing",
       notes: [],
+      documents: {},
       amountCheck: "not_started"
     }
   };

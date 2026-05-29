@@ -29,6 +29,7 @@ export const sampleCases: MaintenanceCase[] = [
       invoice: "missing",
       archive: "missing",
       notes: ["Job detail amount matches selected quotation lines."],
+      documents: {},
       amountCheck: "warning"
     }
   },
@@ -60,6 +61,7 @@ export const sampleCases: MaintenanceCase[] = [
       invoice: "missing",
       archive: "uploaded",
       notes: ["Waiting invoice from supplier."],
+      documents: {},
       amountCheck: "passed"
     }
   },
@@ -89,6 +91,7 @@ export const sampleCases: MaintenanceCase[] = [
       invoice: "missing",
       archive: "missing",
       notes: ["Needs scope confirmation before supplier assignment."],
+      documents: {},
       amountCheck: "not_started"
     }
   }

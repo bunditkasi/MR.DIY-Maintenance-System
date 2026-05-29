@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addCaseNote, updateAmountCheck, updateDocumentStatus } from "./caseWorkflow";
+import { addCaseNote, attachDocumentFile, updateAmountCheck, updateDocumentStatus } from "./caseWorkflow";
 import type { MaintenanceCase } from "./types";
 
 describe("updateDocumentStatus", () => {
@@ -53,6 +53,33 @@ describe("addCaseNote", () => {
   });
 });
 
+describe("attachDocumentFile", () => {
+  it("attaches file metadata to a document type and marks it uploaded", () => {
+    const cases = [makeCase("L00055"), makeCase("L00056")];
+
+    const result = attachDocumentFile(
+      cases,
+      "L00055",
+      "quotation",
+      { name: "QT-CNQC.xlsx", size: 2048, type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      "2026-05-29T15:00:00.000Z"
+    );
+
+    expect(result[0].appWork.quotation).toBe("uploaded");
+    expect(result[0].appWork.documents.quotation).toEqual([
+      {
+        id: "quotation-2026-05-29T15:00:00.000Z-QT-CNQC.xlsx",
+        name: "QT-CNQC.xlsx",
+        size: 2048,
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        uploadedAt: "2026-05-29T15:00:00.000Z"
+      }
+    ]);
+    expect(result[0].updatedAt).toBe("2026-05-29T15:00:00.000Z");
+    expect(result[1]).toBe(cases[1]);
+  });
+});
+
 function makeCase(ticketNo: string): MaintenanceCase {
   return {
     id: `case-${ticketNo}`,
@@ -70,6 +97,7 @@ function makeCase(ticketNo: string): MaintenanceCase {
       invoice: "missing",
       archive: "missing",
       notes: [],
+      documents: {},
       amountCheck: "not_started"
     }
   };

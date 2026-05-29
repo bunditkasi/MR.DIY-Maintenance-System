@@ -549,6 +549,18 @@ tbody tr:hover,
   font-size: 13px;
 }
 
+.check-row {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.check-main,
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .check-row svg,
 .validation-passed svg {
   color: #16a34a;
@@ -574,6 +586,35 @@ tbody tr:hover,
   font-size: 12px;
   font-weight: 700;
   text-transform: capitalize;
+}
+
+.file-row {
+  padding-left: 26px;
+}
+
+.file-row span {
+  min-width: 0;
+  color: #687386;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.file-attach {
+  height: 26px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1850ad;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.file-attach input {
+  display: none;
 }
 
 .validation-review {
