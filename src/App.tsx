@@ -20,10 +20,12 @@ import { addCaseNote, attachDocumentFile, updateAmountCheck, updateDocumentStatu
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import { validatePoSummary } from "./domain/poExcel";
+import { validateQuotationSummary } from "./domain/quotationExcel";
 import { sampleCases } from "./domain/sampleData";
 import type { AppWorkData, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
 import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
 import { readPoFileSummary } from "./lib/poFileReader";
+import { readQuotationFileSummary } from "./lib/quotationFileReader";
 import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
 import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
 
@@ -243,6 +245,24 @@ export default function App() {
         nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, "warning");
         nextCases = addCaseNote(nextCases, selectedCase.ticketNo, "PO validation: Could not read PO Excel file.");
         message = error instanceof Error ? `Attached PO, but Excel validation failed: ${error.message}` : "Attached PO, but Excel validation failed.";
+      }
+    }
+
+    if (documentKey === "quotation") {
+      try {
+        const summary = await readQuotationFileSummary(file);
+        const validation = validateQuotationSummary(
+          selectedCase.larkSnapshot.quotationNo,
+          getCaseDetail(selectedCase).beforeVatAmount,
+          summary
+        );
+        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, validation.status);
+        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, `Quotation validation: ${validation.message}`);
+        message = `Attached quotation and ${validation.status === "passed" ? "validated" : "flagged"}: ${validation.message}`;
+      } catch (error) {
+        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, "warning");
+        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, "Quotation validation: Could not read quotation Excel file.");
+        message = error instanceof Error ? `Attached quotation, but Excel validation failed: ${error.message}` : "Attached quotation, but Excel validation failed.";
       }
     }
 
