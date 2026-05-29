@@ -678,6 +678,112 @@ tbody tr:hover,
   font-weight: 700;
 }
 
+.workspace-panel {
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #fbfcff;
+  overflow: hidden;
+}
+
+.workspace-actions {
+  padding: 10px;
+  border-bottom: 1px solid #e7ebf2;
+}
+
+.workspace-actions select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #182033;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-actions select:disabled {
+  color: #687386;
+  background: #f3f6fb;
+  cursor: not-allowed;
+}
+
+.packet-table {
+  display: grid;
+}
+
+.packet-row {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 72px 94px;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-top: 1px solid #edf0f5;
+  font-size: 12px;
+}
+
+.packet-row:first-child {
+  border-top: 0;
+}
+
+.packet-row strong {
+  color: #1850ad;
+  font-size: 12px;
+}
+
+.packet-row span {
+  color: #182033;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.packet-row input {
+  width: 100%;
+  height: 30px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  color: #182033;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.packet-row em {
+  color: #15803d;
+  font-style: normal;
+  font-weight: 800;
+  text-align: right;
+}
+
+.packet-total {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid #e7ebf2;
+  background: #ffffff;
+}
+
+.packet-total span,
+.packet-total strong {
+  min-height: 30px;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #465266;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.packet-total strong {
+  color: #15803d;
+  background: #f0fdf4;
+}
+
 .note-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 64px;
@@ -888,5 +994,14 @@ tbody tr:hover,
 
   .search-box {
     width: 100%;
+  }
+
+  .packet-row,
+  .packet-total {
+    grid-template-columns: 1fr;
+  }
+
+  .packet-row em {
+    text-align: left;
   }
 }

@@ -25,6 +25,31 @@ export type DocumentFileMeta = {
 
 export type DocumentFileMap = Partial<Record<"jobDetail" | "quotation" | "po" | "invoice" | "archive", DocumentFileMeta[]>>;
 
+export type PacketMatchStatus = "matched" | "manual" | "price_changed";
+
+export type CasePacketItem = {
+  id: string;
+  priceMasterCode?: string;
+  priceMasterSheet?: string;
+  itemCode?: string;
+  description: string;
+  supplierDescription?: string;
+  quantity: number;
+  unit: string;
+  materialUnitPrice: number;
+  laborUnitPrice: number;
+  lineTotal: number;
+  matchStatus: PacketMatchStatus;
+};
+
+export type CasePacket = {
+  supplier?: string;
+  items: CasePacketItem[];
+  subtotal: number;
+  vat: number;
+  grandTotal: number;
+};
+
 export type AppWorkData = {
   jobDetail: DocumentStatus;
   quotation: DocumentStatus;
@@ -34,6 +59,7 @@ export type AppWorkData = {
   notes: string[];
   documents: DocumentFileMap;
   amountCheck: "not_started" | "passed" | "warning" | "blocked";
+  casePacket?: CasePacket;
 };
 
 export type MaintenanceCase = {

@@ -1,4 +1,5 @@
-import type { AppWorkData, DocumentStatus, MaintenanceCase } from "./types";
+import { addPacketItemFromPriceMaster, getCasePacket, updatePacketItemQuantity } from "./casePacket";
+import type { AppWorkData, DocumentStatus, MaintenanceCase, PriceMasterItem } from "./types";
 
 export type DocumentKey = Extract<keyof AppWorkData, "jobDetail" | "quotation" | "po" | "invoice" | "archive">;
 export type AmountCheckStatus = AppWorkData["amountCheck"];
@@ -120,6 +121,59 @@ export function attachDocumentFile(
           ...currentDocuments,
           [documentKey]: [fileMeta, ...(currentDocuments[documentKey] ?? [])]
         }
+      }
+    };
+  });
+
+  return changed ? nextCases : cases;
+}
+
+export function addPriceMasterItemToCasePacket(
+  cases: MaintenanceCase[],
+  ticketNo: string,
+  priceItem: PriceMasterItem,
+  updatedAt: string = new Date().toISOString()
+): MaintenanceCase[] {
+  let changed = false;
+  const nextCases = cases.map((item) => {
+    if (item.ticketNo !== ticketNo) {
+      return item;
+    }
+
+    changed = true;
+    return {
+      ...item,
+      updatedAt,
+      appWork: {
+        ...item.appWork,
+        casePacket: addPacketItemFromPriceMaster(getCasePacket(item.appWork), priceItem)
+      }
+    };
+  });
+
+  return changed ? nextCases : cases;
+}
+
+export function updateCasePacketItemQuantity(
+  cases: MaintenanceCase[],
+  ticketNo: string,
+  itemId: string,
+  quantity: number,
+  updatedAt: string = new Date().toISOString()
+): MaintenanceCase[] {
+  let changed = false;
+  const nextCases = cases.map((item) => {
+    if (item.ticketNo !== ticketNo) {
+      return item;
+    }
+
+    changed = true;
+    return {
+      ...item,
+      updatedAt,
+      appWork: {
+        ...item.appWork,
+        casePacket: updatePacketItemQuantity(getCasePacket(item.appWork), itemId, quantity)
       }
     };
   });

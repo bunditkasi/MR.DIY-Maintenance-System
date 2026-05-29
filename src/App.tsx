@@ -15,15 +15,16 @@ import {
   XCircle
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { getCasePacket } from "./domain/casePacket";
 import { getCaseDetail } from "./domain/caseDetail";
-import { addCaseNote, attachDocumentFile, updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
+import { addCaseNote, addPriceMasterItemToCasePacket, attachDocumentFile, updateAmountCheck, updateCasePacketItemQuantity, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import type { PriceMasterItem } from "./domain/priceMaster";
 import { validatePoSummary } from "./domain/poExcel";
 import { validateQuotationSummary } from "./domain/quotationExcel";
 import { sampleCases } from "./domain/sampleData";
-import type { AppWorkData, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
+import type { AppWorkData, CasePacket, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
 import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
 import { readPoFileSummary } from "./lib/poFileReader";
 import { readPriceMasterFile } from "./lib/priceMasterFileReader";
@@ -240,6 +241,34 @@ export default function App() {
     setPersistence({
       status: "not_configured",
       message: `Saved note for ${selectedCase.ticketNo} locally.`
+    });
+  }
+
+  function handleAddPriceMasterItem(item: PriceMasterItem) {
+    if (!selectedCase) {
+      return;
+    }
+
+    const nextCases = addPriceMasterItemToCasePacket(cases, selectedCase.ticketNo, item);
+    setCases(nextCases);
+    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
+    setPersistence({
+      status: "not_configured",
+      message: `Added ${item.diyCode} to ${selectedCase.ticketNo} workspace locally.`
+    });
+  }
+
+  function handlePacketQuantityChange(itemId: string, quantity: number) {
+    if (!selectedCase) {
+      return;
+    }
+
+    const nextCases = updateCasePacketItemQuantity(cases, selectedCase.ticketNo, itemId, quantity);
+    setCases(nextCases);
+    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
+    setPersistence({
+      status: "not_configured",
+      message: `Updated ${selectedCase.ticketNo} workspace quantity locally.`
     });
   }
 
@@ -466,6 +495,9 @@ export default function App() {
               onAmountCheckChange={handleAmountCheckChange}
               onAddCaseNote={handleAddCaseNote}
               onDocumentFileAttach={handleDocumentFileAttach}
+              priceMaster={priceMaster}
+              onAddPriceMasterItem={handleAddPriceMasterItem}
+              onPacketQuantityChange={handlePacketQuantityChange}
             />
           ) : null}
         </div>
@@ -558,7 +590,10 @@ function CasePanel({
   onDocumentStatusChange,
   onAmountCheckChange,
   onAddCaseNote,
-  onDocumentFileAttach
+  onDocumentFileAttach,
+  priceMaster,
+  onAddPriceMasterItem,
+  onPacketQuantityChange
 }: {
   item: MaintenanceCase;
   importResult: ImportResult | null;
@@ -566,10 +601,14 @@ function CasePanel({
   onAmountCheckChange: (status: AmountCheckStatus) => void;
   onAddCaseNote: (note: string) => void;
   onDocumentFileAttach: (documentKey: DocumentKey, file: File) => void;
+  priceMaster: PriceMasterItem[];
+  onAddPriceMasterItem: (item: PriceMasterItem) => void;
+  onPacketQuantityChange: (itemId: string, quantity: number) => void;
 }) {
   const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
   const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
   const detail = getCaseDetail(item);
+  const packet = getCasePacket(item.appWork);
 
   return (
     <aside className="case-panel">
@@ -611,7 +650,17 @@ function CasePanel({
       </section>
 
       <section className="panel-section" id="documents">
-        <h3>Document Checklist</h3>
+        <h3>Document Workspace</h3>
+        <DocumentWorkspace
+          packet={packet}
+          priceMaster={priceMaster}
+          onAddPriceMasterItem={onAddPriceMasterItem}
+          onQuantityChange={onPacketQuantityChange}
+        />
+      </section>
+
+      <section className="panel-section">
+        <h3>Legacy File Check</h3>
         <div className="checklist">
           {documentLabels.map(({ key, label }) => (
             <ChecklistRow
@@ -673,6 +722,76 @@ function CasePanel({
       </section>
     </aside>
   );
+}
+
+function DocumentWorkspace({
+  packet,
+  priceMaster,
+  onAddPriceMasterItem,
+  onQuantityChange
+}: {
+  packet: CasePacket;
+  priceMaster: PriceMasterItem[];
+  onAddPriceMasterItem: (item: PriceMasterItem) => void;
+  onQuantityChange: (itemId: string, quantity: number) => void;
+}) {
+  const selectableItems = priceMaster.slice(0, 80);
+
+  return (
+    <div className="workspace-panel">
+      <div className="workspace-actions">
+        <select
+          aria-label="Add price master item"
+          defaultValue=""
+          disabled={priceMaster.length === 0}
+          onChange={(event) => {
+            const selected = priceMaster.find((item) => getPriceMasterOptionValue(item) === event.target.value);
+            if (selected) {
+              onAddPriceMasterItem(selected);
+              event.target.value = "";
+            }
+          }}
+        >
+          <option value="">{priceMaster.length > 0 ? "Add work item from Price Master" : "Import Price Master first"}</option>
+          {selectableItems.map((item) => (
+            <option key={getPriceMasterOptionValue(item)} value={getPriceMasterOptionValue(item)}>
+              {item.diyCode} - {item.description}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="packet-table">
+        {packet.items.length > 0 ? packet.items.map((item) => (
+          <div className="packet-row" key={item.id}>
+            <strong>{item.priceMasterCode ?? "Manual"}</strong>
+            <span>{item.description}</span>
+            <input
+              aria-label={`Quantity for ${item.description}`}
+              min="0"
+              step="0.01"
+              type="number"
+              value={item.quantity}
+              onChange={(event) => onQuantityChange(item.id, Number(event.target.value))}
+            />
+            <em>{item.lineTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</em>
+          </div>
+        )) : (
+          <p className="muted history-empty">Add work items from Price Master to build Job Detail, Quotation and PO from the same data.</p>
+        )}
+      </div>
+
+      <div className="packet-total">
+        <span>Subtotal {packet.subtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <span>VAT {packet.vat.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <strong>Total {packet.grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+      </div>
+    </div>
+  );
+}
+
+function getPriceMasterOptionValue(item: PriceMasterItem): string {
+  return `${item.sourceSheet}-${item.diyCode}-${item.description}`;
 }
 
 function DetailBlock({
