@@ -19,9 +19,11 @@ import { getCaseDetail } from "./domain/caseDetail";
 import { addCaseNote, attachDocumentFile, updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
+import { validatePoSummary } from "./domain/poExcel";
 import { sampleCases } from "./domain/sampleData";
 import type { AppWorkData, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
 import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
+import { readPoFileSummary } from "./lib/poFileReader";
 import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
 import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
 
@@ -217,21 +219,38 @@ export default function App() {
     });
   }
 
-  function handleDocumentFileAttach(documentKey: DocumentKey, file: File) {
+  async function handleDocumentFileAttach(documentKey: DocumentKey, file: File) {
     if (!selectedCase) {
       return;
     }
 
-    const nextCases = attachDocumentFile(cases, selectedCase.ticketNo, documentKey, {
+    let nextCases = attachDocumentFile(cases, selectedCase.ticketNo, documentKey, {
       name: file.name,
       size: file.size,
       type: file.type || "application/octet-stream"
     });
+
+    let message = `Attached ${file.name} to ${selectedCase.ticketNo} locally.`;
+
+    if (documentKey === "po") {
+      try {
+        const summary = await readPoFileSummary(file);
+        const validation = validatePoSummary(getCaseDetail(selectedCase).beforeVatAmount, summary);
+        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, validation.status);
+        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, `PO validation: ${validation.message}`);
+        message = `Attached PO and ${validation.status === "passed" ? "validated" : "flagged"}: ${validation.message}`;
+      } catch (error) {
+        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, "warning");
+        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, "PO validation: Could not read PO Excel file.");
+        message = error instanceof Error ? `Attached PO, but Excel validation failed: ${error.message}` : "Attached PO, but Excel validation failed.";
+      }
+    }
+
     setCases(nextCases);
     saveLocalState(nextCases, importHistory);
     setPersistence({
       status: "not_configured",
-      message: `Attached ${file.name} to ${selectedCase.ticketNo} locally.`
+      message
     });
   }
 
