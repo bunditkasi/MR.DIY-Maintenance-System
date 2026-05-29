@@ -59,3 +59,16 @@ export type ImportResult = {
   conflicts: ImportConflict[];
   invalidRows: ImportInvalidRow[];
 };
+
+export type ImportHistoryEntry = {
+  id: string;
+  fileName: string;
+  importedAt: string;
+  totalRows: number;
+  newCount: number;
+  updatedCount: number;
+  unchangedCount: number;
+  conflictCount: number;
+  invalidCount: number;
+  storageStatus: "local" | "supabase" | "error";
+};

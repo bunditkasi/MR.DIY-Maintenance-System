@@ -16,8 +16,10 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
+import { createImportHistoryEntry } from "./domain/importHistory";
 import { sampleCases } from "./domain/sampleData";
-import type { AppWorkData, DocumentStatus, ImportResult, MaintenanceCase } from "./domain/types";
+import type { AppWorkData, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
+import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
 import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
 import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
 
@@ -33,8 +35,11 @@ const documentLabels: Array<{ key: DocumentKey; label: string }> = [
 ];
 
 export default function App() {
-  const [cases, setCases] = useState<MaintenanceCase[]>(sampleCases);
-  const [selectedTicket, setSelectedTicket] = useState(sampleCases[0]?.ticketNo ?? "");
+  const initialBrowserState = getInitialBrowserState();
+  const initialCases = initialBrowserState?.cases.length ? initialBrowserState.cases : sampleCases;
+  const [cases, setCases] = useState<MaintenanceCase[]>(initialCases);
+  const [selectedTicket, setSelectedTicket] = useState(initialCases[0]?.ticketNo ?? "");
+  const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(initialBrowserState?.importHistory ?? []);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [lastImportName, setLastImportName] = useState("");
   const [persistence, setPersistence] = useState<{ status: PersistenceStatus; message: string }>({
@@ -108,10 +113,14 @@ export default function App() {
     const csvText = await file.text();
     const parsed = parseCsv(csvText);
     const result = syncLarkRows(cases, parsed.rows, parsed.invalidRows);
+    const historyEntry = createImportHistoryEntry(file.name, result);
+    const nextHistory = [historyEntry, ...importHistory].slice(0, 20);
     setCases(result.cases);
+    setImportHistory(nextHistory);
     setImportResult(result);
     setLastImportName(file.name);
-    void persistImport(file.name, result);
+    saveLocalState(result.cases, nextHistory);
+    void persistImport(file.name, result, historyEntry.id, nextHistory);
     if (result.newCases[0]) {
       setSelectedTicket(result.newCases[0].ticketNo);
     } else if (result.updatedCases[0]) {
@@ -119,7 +128,12 @@ export default function App() {
     }
   }
 
-  async function persistImport(fileName: string, result: ImportResult) {
+  async function persistImport(
+    fileName: string,
+    result: ImportResult,
+    historyEntryId: string,
+    currentHistory: ImportHistoryEntry[]
+  ) {
     const client = getSupabaseClient();
     if (!client) {
       setPersistence({
@@ -134,8 +148,18 @@ export default function App() {
     try {
       await ensureSupabaseSession(client);
       const batchId = await saveImportResult(client, fileName, result);
+      const syncedHistory = currentHistory.map((entry) => entry.id === historyEntryId
+        ? { ...entry, id: batchId, storageStatus: "supabase" as const }
+        : entry);
+      setImportHistory(syncedHistory);
+      saveLocalState(result.cases, syncedHistory);
       setPersistence({ status: "saved", message: `Saved to Supabase import batch ${batchId}.` });
     } catch (error) {
+      const failedHistory = currentHistory.map((entry) => entry.id === historyEntryId
+        ? { ...entry, storageStatus: "error" as const }
+        : entry);
+      setImportHistory(failedHistory);
+      saveLocalState(result.cases, failedHistory);
       setPersistence({
         status: "error",
         message: error instanceof Error ? error.message : "Could not save import history to Supabase."
@@ -272,9 +296,50 @@ export default function App() {
 
           {selectedCase ? <CasePanel item={selectedCase} importResult={importResult} /> : null}
         </div>
+
+        <section className="history-panel" id="history">
+          <div className="section-head">
+            <div>
+              <h2>Import History</h2>
+              <span>{importHistory.length} recent imports saved in this browser</span>
+            </div>
+          </div>
+          <div className="history-list">
+            {importHistory.length > 0 ? importHistory.map((entry) => (
+              <div className="history-row" key={`${entry.id}-${entry.importedAt}`}>
+                <div>
+                  <strong>{entry.fileName}</strong>
+                  <span>{formatDateTime(entry.importedAt)}</span>
+                </div>
+                <HistoryMetric label="Rows" value={entry.totalRows} />
+                <HistoryMetric label="New" value={entry.newCount} />
+                <HistoryMetric label="Updated" value={entry.updatedCount} />
+                <HistoryMetric label="Conflicts" value={entry.conflictCount} />
+                <HistoryMetric label="Invalid" value={entry.invalidCount} />
+                <span className={`storage-pill storage-${entry.storageStatus}`}>{entry.storageStatus}</span>
+              </div>
+            )) : (
+              <p className="muted history-empty">No CSV import has been saved yet.</p>
+            )}
+          </div>
+        </section>
       </main>
     </div>
   );
+}
+
+function getInitialBrowserState() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  return loadBrowserState(window.localStorage);
+}
+
+function saveLocalState(cases: MaintenanceCase[], importHistory: ImportHistoryEntry[]): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  saveBrowserState(window.localStorage, { cases, importHistory });
 }
 
 function getImportedRowCount(result: ImportResult): number {
@@ -291,6 +356,22 @@ function Metric({ label, value, tone }: { label: string; value: number; tone: "g
       <strong>{value}</strong>
     </div>
   );
+}
+
+function HistoryMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="history-metric">
+      <span>{label}</span>
+      <strong>{value.toLocaleString()}</strong>
+    </div>
+  );
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(new Date(value));
 }
 
 function CasePanel({ item, importResult }: { item: MaintenanceCase; importResult: ImportResult | null }) {
