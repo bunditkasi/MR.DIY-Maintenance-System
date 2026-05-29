@@ -425,6 +425,8 @@ tbody tr:hover,
   padding: 14px;
   display: grid;
   gap: 16px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
 }
 
 .panel-title {
@@ -482,9 +484,54 @@ tbody tr:hover,
 .checklist,
 .validation-stack,
 .alert-list,
-.change-list {
+.change-list,
+.detail-stack {
   display: grid;
   gap: 8px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.detail-block {
+  min-width: 0;
+  border: 1px solid #e7ebf2;
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fbfcff;
+}
+
+.detail-block-large {
+  background: #ffffff;
+}
+
+.detail-block span,
+.detail-block strong,
+.detail-block a {
+  display: block;
+}
+
+.detail-block span {
+  color: #687386;
+  font-size: 11px;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.detail-block strong,
+.detail-block a {
+  color: #182033;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.detail-block a {
+  color: #1850ad;
 }
 
 .check-row,

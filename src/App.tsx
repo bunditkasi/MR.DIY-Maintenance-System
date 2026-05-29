@@ -15,6 +15,7 @@ import {
   XCircle
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { getCaseDetail } from "./domain/caseDetail";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import { sampleCases } from "./domain/sampleData";
@@ -377,6 +378,7 @@ function formatDateTime(value: string): string {
 function CasePanel({ item, importResult }: { item: MaintenanceCase; importResult: ImportResult | null }) {
   const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
   const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
+  const detail = getCaseDetail(item);
 
   return (
     <aside className="case-panel">
@@ -394,6 +396,28 @@ function CasePanel({ item, importResult }: { item: MaintenanceCase; importResult
         <div><dt>Quotation</dt><dd>{item.larkSnapshot.quotationNo || "Waiting"}</dd></div>
         <div><dt>PO</dt><dd>{item.larkSnapshot.poNo || "Not created"}</dd></div>
       </dl>
+
+      <section className="panel-section">
+        <h3>Lark Ticket Detail</h3>
+        <div className="detail-stack">
+          <DetailBlock label="Branch request" value={detail.branchRequest} large />
+          <DetailBlock label="Maintenance scope" value={detail.maintenanceScope} large />
+          <div className="detail-grid">
+            <DetailBlock label="Sup category" value={detail.supplierCategory} />
+            <DetailBlock label="Rank" value={detail.rank} />
+            <DetailBlock label="Job done by" value={detail.jobDoneBy} />
+            <DetailBlock label="Contractor status" value={detail.contractorStatus} />
+            <DetailBlock label="SLA days" value={detail.slaDays} />
+            <DetailBlock label="Plan date" value={detail.plannedAt} />
+            <DetailBlock label="Due date" value={detail.dueAt} />
+            <DetailBlock label="Finish date" value={detail.finishedAt} />
+            <DetailBlock label="Phone" value={detail.phoneNumber} />
+            <DetailBlock label="PO status" value={detail.poStatus} />
+            <DetailBlock label="Before VAT" value={formatAmount(detail.beforeVatAmount)} />
+            <DetailBlock label="Map" value={detail.mapUrl} href={detail.mapUrl} />
+          </div>
+        </div>
+      </section>
 
       <section className="panel-section" id="documents">
         <h3>Document Checklist</h3>
@@ -436,6 +460,38 @@ function CasePanel({ item, importResult }: { item: MaintenanceCase; importResult
       </section>
     </aside>
   );
+}
+
+function DetailBlock({
+  label,
+  value,
+  href,
+  large = false
+}: {
+  label: string;
+  value: string;
+  href?: string;
+  large?: boolean;
+}) {
+  const displayValue = value || "-";
+  return (
+    <div className={large ? "detail-block detail-block-large" : "detail-block"}>
+      <span>{label}</span>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer">{displayValue}</a>
+      ) : (
+        <strong>{displayValue}</strong>
+      )}
+    </div>
+  );
+}
+
+function formatAmount(value: string): string {
+  const amount = Number(value.replace(/,/g, ""));
+  if (!Number.isFinite(amount) || !value) {
+    return value;
+  }
+  return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function ChecklistRow({ label, status }: { label: string; status: DocumentStatus }) {
