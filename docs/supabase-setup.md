@@ -25,6 +25,10 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
+## Auth
+
+The app uses Supabase anonymous sign-in so browser users get the `authenticated` role required by RLS policies. Enable anonymous sign-ins in Supabase Auth before expecting CSV imports to save from the web app.
+
 ## Security
 
 RLS is enabled on all tables. The first policy allows authenticated users to manage records. Do not use service role keys in the frontend.

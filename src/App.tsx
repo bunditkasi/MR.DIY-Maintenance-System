@@ -14,12 +14,15 @@ import {
   Upload,
   XCircle
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { sampleCases } from "./domain/sampleData";
 import type { AppWorkData, DocumentStatus, ImportResult, MaintenanceCase } from "./domain/types";
+import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
+import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
 
 type DocumentKey = Extract<keyof AppWorkData, "jobDetail" | "quotation" | "po" | "invoice" | "archive">;
+type PersistenceStatus = "idle" | "not_configured" | "saving" | "saved" | "error";
 
 const documentLabels: Array<{ key: DocumentKey; label: string }> = [
   { key: "jobDetail", label: "Job Detail" },
@@ -34,6 +37,10 @@ export default function App() {
   const [selectedTicket, setSelectedTicket] = useState(sampleCases[0]?.ticketNo ?? "");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [lastImportName, setLastImportName] = useState("");
+  const [persistence, setPersistence] = useState<{ status: PersistenceStatus; message: string }>({
+    status: "idle",
+    message: "Supabase save will run after CSV import when environment variables are configured."
+  });
   const [query, setQuery] = useState("");
 
   const selectedCase = cases.find((item) => item.ticketNo === selectedTicket) ?? cases[0];
@@ -56,6 +63,47 @@ export default function App() {
     });
   }, [cases, query]);
 
+  useEffect(() => {
+    const client = getSupabaseClient();
+    if (!client) {
+      return;
+    }
+    const activeClient = client;
+
+    let cancelled = false;
+
+    async function loadFromSupabase() {
+      try {
+        await ensureSupabaseSession(activeClient);
+        const persistedCases = await loadPersistedCases(activeClient);
+        if (cancelled || persistedCases.length === 0) {
+          return;
+        }
+
+        setCases(persistedCases);
+        setSelectedTicket(persistedCases[0].ticketNo);
+        setPersistence({
+          status: "saved",
+          message: `Loaded ${persistedCases.length.toLocaleString()} cases from Supabase.`
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setPersistence({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load persisted cases from Supabase."
+        });
+      }
+    }
+
+    void loadFromSupabase();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleCsvUpload(file: File) {
     const csvText = await file.text();
     const parsed = parseCsv(csvText);
@@ -63,10 +111,35 @@ export default function App() {
     setCases(result.cases);
     setImportResult(result);
     setLastImportName(file.name);
+    void persistImport(file.name, result);
     if (result.newCases[0]) {
       setSelectedTicket(result.newCases[0].ticketNo);
     } else if (result.updatedCases[0]) {
       setSelectedTicket(result.updatedCases[0].ticketNo);
+    }
+  }
+
+  async function persistImport(fileName: string, result: ImportResult) {
+    const client = getSupabaseClient();
+    if (!client) {
+      setPersistence({
+        status: "not_configured",
+        message: "Local preview only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to save import history."
+      });
+      return;
+    }
+
+    setPersistence({ status: "saving", message: "Saving ticket snapshots and import history to Supabase..." });
+
+    try {
+      await ensureSupabaseSession(client);
+      const batchId = await saveImportResult(client, fileName, result);
+      setPersistence({ status: "saved", message: `Saved to Supabase import batch ${batchId}.` });
+    } catch (error) {
+      setPersistence({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not save import history to Supabase."
+      });
     }
   }
 
@@ -137,6 +210,11 @@ export default function App() {
             </span>
           </div>
           <FileSpreadsheet size={22} />
+        </section>
+
+        <section className={`persistence-banner persistence-${persistence.status}`} aria-label="Database save status">
+          <Database size={18} />
+          <span>{persistence.message}</span>
         </section>
 
         <div className="content-grid">

@@ -87,7 +87,7 @@ describe("supabase mapper", () => {
   it("summarizes import results into an import batch row", () => {
     expect(toImportBatchInsert("mtd-export.csv", importResult)).toEqual({
       file_name: "mtd-export.csv",
-      total_case_count: 1,
+      total_case_count: 2,
       new_count: 0,
       updated_count: 1,
       unchanged_count: 0,

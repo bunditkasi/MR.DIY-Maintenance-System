@@ -226,6 +226,47 @@ input {
   flex: 0 0 auto;
 }
 
+.persistence-banner {
+  min-height: 42px;
+  border: 1px solid #dfe4ec;
+  border-radius: 8px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  color: #465266;
+  font-size: 13px;
+}
+
+.persistence-banner svg {
+  flex: 0 0 auto;
+}
+
+.persistence-saving {
+  color: #1850ad;
+  background: #f7faff;
+  border-color: #bfd0f6;
+}
+
+.persistence-saved {
+  color: #15803d;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.persistence-not_configured {
+  color: #8a4b00;
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.persistence-error {
+  color: #b91c1c;
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

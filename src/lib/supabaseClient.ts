@@ -16,3 +16,15 @@ export function getSupabaseClient(): SupabaseClient | null {
 
   return cachedClient;
 }
+
+export async function ensureSupabaseSession(client: SupabaseClient): Promise<void> {
+  const current = await client.auth.getSession();
+  if (current.data.session) {
+    return;
+  }
+
+  const created = await client.auth.signInAnonymously();
+  if (created.error) {
+    throw new Error(created.error.message);
+  }
+}
