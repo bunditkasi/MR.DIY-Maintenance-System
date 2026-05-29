@@ -15,7 +15,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -558,6 +559,20 @@ tbody tr:hover,
   margin-left: auto;
   font-size: 11px;
   color: #687386;
+  text-transform: capitalize;
+}
+
+.check-row select {
+  margin-left: auto;
+  min-width: 104px;
+  height: 28px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #182033;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
   text-transform: capitalize;
 }
 

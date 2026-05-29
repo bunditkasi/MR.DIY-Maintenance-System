@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { getCaseDetail } from "./domain/caseDetail";
+import { updateDocumentStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
 import { sampleCases } from "./domain/sampleData";
@@ -24,7 +25,6 @@ import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
 import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
 import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
 
-type DocumentKey = Extract<keyof AppWorkData, "jobDetail" | "quotation" | "po" | "invoice" | "archive">;
 type PersistenceStatus = "idle" | "not_configured" | "saving" | "saved" | "error";
 
 const documentLabels: Array<{ key: DocumentKey; label: string }> = [
@@ -34,6 +34,8 @@ const documentLabels: Array<{ key: DocumentKey; label: string }> = [
   { key: "invoice", label: "Invoice" },
   { key: "archive", label: "Archive" }
 ];
+
+const documentStatusOptions: DocumentStatus[] = ["missing", "uploaded", "validated", "approved"];
 
 export default function App() {
   const initialBrowserState = getInitialBrowserState();
@@ -168,6 +170,20 @@ export default function App() {
     }
   }
 
+  function handleDocumentStatusChange(documentKey: DocumentKey, status: DocumentStatus) {
+    if (!selectedCase) {
+      return;
+    }
+
+    const nextCases = updateDocumentStatus(cases, selectedCase.ticketNo, documentKey, status);
+    setCases(nextCases);
+    saveLocalState(nextCases, importHistory);
+    setPersistence({
+      status: "not_configured",
+      message: `Saved ${selectedCase.ticketNo} ${documentKey} status locally.`
+    });
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -295,7 +311,13 @@ export default function App() {
             </div>
           </section>
 
-          {selectedCase ? <CasePanel item={selectedCase} importResult={importResult} /> : null}
+          {selectedCase ? (
+            <CasePanel
+              item={selectedCase}
+              importResult={importResult}
+              onDocumentStatusChange={handleDocumentStatusChange}
+            />
+          ) : null}
         </div>
 
         <section className="history-panel" id="history">
@@ -375,7 +397,15 @@ function formatDateTime(value: string): string {
   }).format(new Date(value));
 }
 
-function CasePanel({ item, importResult }: { item: MaintenanceCase; importResult: ImportResult | null }) {
+function CasePanel({
+  item,
+  importResult,
+  onDocumentStatusChange
+}: {
+  item: MaintenanceCase;
+  importResult: ImportResult | null;
+  onDocumentStatusChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
+}) {
   const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
   const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
   const detail = getCaseDetail(item);
@@ -423,7 +453,13 @@ function CasePanel({ item, importResult }: { item: MaintenanceCase; importResult
         <h3>Document Checklist</h3>
         <div className="checklist">
           {documentLabels.map(({ key, label }) => (
-            <ChecklistRow key={key} label={label} status={item.appWork[key]} />
+            <ChecklistRow
+              key={key}
+              documentKey={key}
+              label={label}
+              status={item.appWork[key]}
+              onChange={onDocumentStatusChange}
+            />
           ))}
         </div>
       </section>
@@ -494,13 +530,31 @@ function formatAmount(value: string): string {
   return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function ChecklistRow({ label, status }: { label: string; status: DocumentStatus }) {
+function ChecklistRow({
+  documentKey,
+  label,
+  status,
+  onChange
+}: {
+  documentKey: DocumentKey;
+  label: string;
+  status: DocumentStatus;
+  onChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
+}) {
   const done = status === "validated" || status === "approved";
   return (
     <div className="check-row">
       {done ? <CheckCircle2 size={18} /> : status === "missing" ? <XCircle size={18} /> : <FileCheck2 size={18} />}
       <span>{label}</span>
-      <strong>{status}</strong>
+      <select
+        aria-label={`${label} status`}
+        value={status}
+        onChange={(event) => onChange(documentKey, event.target.value as DocumentStatus)}
+      >
+        {documentStatusOptions.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
     </div>
   );
 }
