@@ -161,6 +161,26 @@ select {
   display: none;
 }
 
+.secondary-upload {
+  height: 34px;
+  border: 1px solid #d7deea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1850ad;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.secondary-upload input {
+  display: none;
+}
+
 .import-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(110px, 1fr));
@@ -277,7 +297,8 @@ select {
 
 .case-list,
 .case-panel,
-.history-panel {
+.history-panel,
+.price-master-panel {
   background: #ffffff;
   border: 1px solid #dfe4ec;
   border-radius: 8px;
@@ -795,6 +816,41 @@ tbody tr:hover,
 
 .history-empty {
   padding: 14px;
+}
+
+.price-master-panel {
+  overflow: hidden;
+}
+
+.price-preview {
+  display: grid;
+}
+
+.price-row {
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-top: 1px solid #edf0f5;
+  font-size: 13px;
+}
+
+.price-row strong {
+  color: #1850ad;
+}
+
+.price-row span {
+  color: #182033;
+  overflow-wrap: anywhere;
+}
+
+.price-row em {
+  color: #15803d;
+  font-style: normal;
+  font-weight: 800;
+  text-align: right;
 }
 
 @media (max-width: 1080px) {

@@ -25,7 +25,7 @@ describe("browser persistence", () => {
 
     saveBrowserState(localStorageLike, { cases, importHistory });
 
-    expect(loadBrowserState(localStorageLike)).toEqual({ cases, importHistory });
+    expect(loadBrowserState(localStorageLike)).toEqual({ cases, importHistory, priceMaster: [] });
   });
 
   it("returns null when stored JSON is not readable", () => {

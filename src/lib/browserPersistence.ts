@@ -1,10 +1,12 @@
-import type { ImportHistoryEntry, MaintenanceCase } from "../domain/types";
+import type { ImportHistoryEntry, MaintenanceCase, PriceMasterItem } from "../domain/types";
 
 const STORAGE_KEY = "mrdiy-maintenance-state-v1";
 
 type BrowserState = {
   cases: MaintenanceCase[];
   importHistory: ImportHistoryEntry[];
+  priceMaster?: PriceMasterItem[];
+  priceMasterFileName?: string;
 };
 
 type StorageLike = {
@@ -27,7 +29,10 @@ export function loadBrowserState(storage: StorageLike): BrowserState | null {
     if (!Array.isArray(parsed.cases) || !Array.isArray(parsed.importHistory)) {
       return null;
     }
-    return parsed;
+    return {
+      ...parsed,
+      priceMaster: Array.isArray(parsed.priceMaster) ? parsed.priceMaster : []
+    };
   } catch {
     return null;
   }

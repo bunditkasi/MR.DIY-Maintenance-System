@@ -19,12 +19,14 @@ import { getCaseDetail } from "./domain/caseDetail";
 import { addCaseNote, attachDocumentFile, updateAmountCheck, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
+import type { PriceMasterItem } from "./domain/priceMaster";
 import { validatePoSummary } from "./domain/poExcel";
 import { validateQuotationSummary } from "./domain/quotationExcel";
 import { sampleCases } from "./domain/sampleData";
 import type { AppWorkData, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
 import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
 import { readPoFileSummary } from "./lib/poFileReader";
+import { readPriceMasterFile } from "./lib/priceMasterFileReader";
 import { readQuotationFileSummary } from "./lib/quotationFileReader";
 import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
 import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
@@ -48,6 +50,8 @@ export default function App() {
   const [cases, setCases] = useState<MaintenanceCase[]>(initialCases);
   const [selectedTicket, setSelectedTicket] = useState(initialCases[0]?.ticketNo ?? "");
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(initialBrowserState?.importHistory ?? []);
+  const [priceMaster, setPriceMaster] = useState<PriceMasterItem[]>(initialBrowserState?.priceMaster ?? []);
+  const [priceMasterFileName, setPriceMasterFileName] = useState(initialBrowserState?.priceMasterFileName ?? "");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [lastImportName, setLastImportName] = useState("");
   const [persistence, setPersistence] = useState<{ status: PersistenceStatus; message: string }>({
@@ -127,12 +131,30 @@ export default function App() {
     setImportHistory(nextHistory);
     setImportResult(result);
     setLastImportName(file.name);
-    saveLocalState(result.cases, nextHistory);
+    saveLocalState(result.cases, nextHistory, priceMaster, priceMasterFileName);
     void persistImport(file.name, result, historyEntry.id, nextHistory);
     if (result.newCases[0]) {
       setSelectedTicket(result.newCases[0].ticketNo);
     } else if (result.updatedCases[0]) {
       setSelectedTicket(result.updatedCases[0].ticketNo);
+    }
+  }
+
+  async function handlePriceMasterUpload(file: File) {
+    try {
+      const items = await readPriceMasterFile(file);
+      setPriceMaster(items);
+      setPriceMasterFileName(file.name);
+      saveLocalState(cases, importHistory, items, file.name);
+      setPersistence({
+        status: "not_configured",
+        message: `Imported ${items.length.toLocaleString()} price master rows locally.`
+      });
+    } catch (error) {
+      setPersistence({
+        status: "error",
+        message: error instanceof Error ? `Could not import price master: ${error.message}` : "Could not import price master."
+      });
     }
   }
 
@@ -160,14 +182,14 @@ export default function App() {
         ? { ...entry, id: batchId, storageStatus: "supabase" as const }
         : entry);
       setImportHistory(syncedHistory);
-      saveLocalState(result.cases, syncedHistory);
+      saveLocalState(result.cases, syncedHistory, priceMaster, priceMasterFileName);
       setPersistence({ status: "saved", message: `Saved to Supabase import batch ${batchId}.` });
     } catch (error) {
       const failedHistory = currentHistory.map((entry) => entry.id === historyEntryId
         ? { ...entry, storageStatus: "error" as const }
         : entry);
       setImportHistory(failedHistory);
-      saveLocalState(result.cases, failedHistory);
+      saveLocalState(result.cases, failedHistory, priceMaster, priceMasterFileName);
       setPersistence({
         status: "error",
         message: error instanceof Error ? error.message : "Could not save import history to Supabase."
@@ -182,7 +204,7 @@ export default function App() {
 
     const nextCases = updateDocumentStatus(cases, selectedCase.ticketNo, documentKey, status);
     setCases(nextCases);
-    saveLocalState(nextCases, importHistory);
+    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
     setPersistence({
       status: "not_configured",
       message: `Saved ${selectedCase.ticketNo} ${documentKey} status locally.`
@@ -196,7 +218,7 @@ export default function App() {
 
     const nextCases = updateAmountCheck(cases, selectedCase.ticketNo, status);
     setCases(nextCases);
-    saveLocalState(nextCases, importHistory);
+    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
     setPersistence({
       status: "not_configured",
       message: `Saved ${selectedCase.ticketNo} amount validation status locally.`
@@ -214,7 +236,7 @@ export default function App() {
     }
 
     setCases(nextCases);
-    saveLocalState(nextCases, importHistory);
+    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
     setPersistence({
       status: "not_configured",
       message: `Saved note for ${selectedCase.ticketNo} locally.`
@@ -267,7 +289,7 @@ export default function App() {
     }
 
     setCases(nextCases);
-    saveLocalState(nextCases, importHistory);
+    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
     setPersistence({
       status: "not_configured",
       message
@@ -346,6 +368,41 @@ export default function App() {
         <section className={`persistence-banner persistence-${persistence.status}`} aria-label="Database save status">
           <Database size={18} />
           <span>{persistence.message}</span>
+        </section>
+
+        <section className="price-master-panel" id="prices">
+          <div className="section-head">
+            <div>
+              <h2>Price Master</h2>
+              <span>{priceMaster.length.toLocaleString()} standard price rows loaded{priceMasterFileName ? ` from ${priceMasterFileName}` : ""}</span>
+            </div>
+            <label className="secondary-upload">
+              <FileSpreadsheet size={16} />
+              Import Price Master
+              <input
+                accept=".xlsx,.xls"
+                type="file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    void handlePriceMasterUpload(file);
+                  }
+                  event.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+          <div className="price-preview">
+            {priceMaster.length > 0 ? priceMaster.slice(0, 5).map((item) => (
+              <div className="price-row" key={`${item.sourceSheet}-${item.diyCode}-${item.description}`}>
+                <strong>{item.diyCode}</strong>
+                <span>{item.description}</span>
+                <em>{item.totalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</em>
+              </div>
+            )) : (
+              <p className="muted history-empty">Import the 2026 standard price file to prepare quotation price matching.</p>
+            )}
+          </div>
         </section>
 
         <div className="content-grid">
@@ -451,11 +508,16 @@ function getInitialBrowserState() {
   return loadBrowserState(window.localStorage);
 }
 
-function saveLocalState(cases: MaintenanceCase[], importHistory: ImportHistoryEntry[]): void {
+function saveLocalState(
+  cases: MaintenanceCase[],
+  importHistory: ImportHistoryEntry[],
+  priceMaster: PriceMasterItem[] = [],
+  priceMasterFileName = ""
+): void {
   if (typeof window === "undefined") {
     return;
   }
-  saveBrowserState(window.localStorage, { cases, importHistory });
+  saveBrowserState(window.localStorage, { cases, importHistory, priceMaster, priceMasterFileName });
 }
 
 function getImportedRowCount(result: ImportResult): number {

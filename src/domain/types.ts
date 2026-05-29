@@ -83,3 +83,5 @@ export type ImportHistoryEntry = {
   invalidCount: number;
   storageStatus: "local" | "supabase" | "error";
 };
+
+export type { PriceMasterItem } from "./priceMaster";
