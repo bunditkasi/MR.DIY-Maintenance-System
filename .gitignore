@@ -3,5 +3,7 @@ dist/
 tmp/
 *.tsbuildinfo
 .vercel/
+.env
+.env.local
 
 .vercel
