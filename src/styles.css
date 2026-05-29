@@ -193,6 +193,39 @@ input {
 .metric-amber strong { color: #b45309; }
 .metric-red strong { color: #dc2626; }
 
+.import-summary {
+  min-height: 58px;
+  border: 1px solid #bfd0f6;
+  border-radius: 8px;
+  background: #f7faff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+}
+
+.import-summary strong,
+.import-summary span {
+  display: block;
+}
+
+.import-summary strong {
+  color: #123f9f;
+  font-size: 14px;
+}
+
+.import-summary span {
+  color: #465266;
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.import-summary svg {
+  color: #1f5eff;
+  flex: 0 0 auto;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;

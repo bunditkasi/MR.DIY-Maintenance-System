@@ -33,6 +33,7 @@ export default function App() {
   const [cases, setCases] = useState<MaintenanceCase[]>(sampleCases);
   const [selectedTicket, setSelectedTicket] = useState(sampleCases[0]?.ticketNo ?? "");
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [lastImportName, setLastImportName] = useState("");
   const [query, setQuery] = useState("");
 
   const selectedCase = cases.find((item) => item.ticketNo === selectedTicket) ?? cases[0];
@@ -61,6 +62,7 @@ export default function App() {
     const result = syncLarkRows(cases, parsed.rows, parsed.invalidRows);
     setCases(result.cases);
     setImportResult(result);
+    setLastImportName(file.name);
     if (result.newCases[0]) {
       setSelectedTicket(result.newCases[0].ticketNo);
     } else if (result.updatedCases[0]) {
@@ -125,6 +127,18 @@ export default function App() {
           <Metric label="Invalid rows" value={importResult?.invalidRows.length ?? 0} tone="red" />
         </section>
 
+        <section className="import-summary" aria-label="Lark CSV compatibility">
+          <div>
+            <strong>{importResult ? "Lark CSV imported" : "Ready for Lark MTD Table CSV"}</strong>
+            <span>
+              {importResult
+                ? `${lastImportName} read ${getImportedRowCount(importResult).toLocaleString()} ticket rows.`
+                : "Supports exported headers: Ticket No., Store Code-Name, Store Code, Store Full Name, Quotation number and PO."}
+            </span>
+          </div>
+          <FileSpreadsheet size={22} />
+        </section>
+
         <div className="content-grid">
           <section className="case-list" id="cases">
             <div className="section-head">
@@ -183,6 +197,13 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function getImportedRowCount(result: ImportResult): number {
+  return result.newCases.length
+    + result.updatedCases.length
+    + result.unchangedCases.length
+    + result.invalidRows.length;
 }
 
 function Metric({ label, value, tone }: { label: string; value: number; tone: "green" | "blue" | "gray" | "amber" | "red" }) {
