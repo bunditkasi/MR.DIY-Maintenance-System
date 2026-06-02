@@ -1,71 +1,73 @@
 import {
-  AlertTriangle,
-  Archive,
-  CheckCircle2,
-  ChevronRight,
-  ClipboardCheck,
+  CalendarDays,
   Database,
-  FileCheck2,
   FileSpreadsheet,
   FileText,
-  FolderOpen,
-  History,
+  Printer,
   Search,
-  Upload,
-  XCircle
+  Upload
 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { getCasePacket, getPacketDocumentReadiness, searchPriceMasterItems } from "./domain/casePacket";
+import { getCasePacket, searchPriceMasterItems } from "./domain/casePacket";
 import { getCaseDetail } from "./domain/caseDetail";
-import { addCaseNote, addPriceMasterItemToCasePacket, attachDocumentFile, updateAmountCheck, updateCasePacketItemQuantity, updateDocumentStatus, type AmountCheckStatus, type DocumentKey } from "./domain/caseWorkflow";
+import { updateCasePacketItemQuantity } from "./domain/caseWorkflow";
 import { parseCsv, syncLarkRows } from "./domain/csvImport";
 import { createImportHistoryEntry } from "./domain/importHistory";
-import type { PriceMasterItem } from "./domain/priceMaster";
-import { validatePoSummary } from "./domain/poExcel";
-import { validateQuotationSummary } from "./domain/quotationExcel";
-import { sampleCases } from "./domain/sampleData";
-import type { AppWorkData, CasePacket, DocumentStatus, ImportHistoryEntry, ImportResult, MaintenanceCase } from "./domain/types";
+import type { CasePacket, CasePacketItem, ImportHistoryEntry, MaintenanceCase, PriceMasterItem } from "./domain/types";
 import { loadBrowserState, saveBrowserState } from "./lib/browserPersistence";
-import { readPoFileSummary } from "./lib/poFileReader";
 import { readPriceMasterFile } from "./lib/priceMasterFileReader";
-import { readQuotationFileSummary } from "./lib/quotationFileReader";
-import { ensureSupabaseSession, getSupabaseClient } from "./lib/supabaseClient";
-import { loadPersistedCases, saveImportResult } from "./lib/supabaseRepository";
+import { sampleCases } from "./domain/sampleData";
+import cnqcLogo from "./assets/cnqc-logo.png";
+import mrDiyLogo from "./assets/mr-diy-always-low-prices-logo.png";
 
-type PersistenceStatus = "idle" | "not_configured" | "saving" | "saved" | "error";
+type ActiveDocument = "jobDetail" | "quotation" | "po";
 
-const documentLabels: Array<{ key: DocumentKey; label: string }> = [
+const documentTabs: Array<{ key: ActiveDocument; label: string }> = [
   { key: "jobDetail", label: "Job Detail" },
   { key: "quotation", label: "Quotation" },
-  { key: "po", label: "PO" },
-  { key: "invoice", label: "Invoice" },
-  { key: "archive", label: "Archive" }
+  { key: "po", label: "PO" }
 ];
-
-const documentStatusOptions: DocumentStatus[] = ["missing", "uploaded", "validated", "approved"];
-const amountCheckOptions: AmountCheckStatus[] = ["not_started", "passed", "warning", "blocked"];
 
 export default function App() {
   const initialBrowserState = getInitialBrowserState();
   const initialCases = initialBrowserState?.cases.length ? initialBrowserState.cases : sampleCases;
   const [cases, setCases] = useState<MaintenanceCase[]>(initialCases);
   const [selectedTicket, setSelectedTicket] = useState(initialCases[0]?.ticketNo ?? "");
+  const [jobDetailTicketNos, setJobDetailTicketNos] = useState<string[]>(initialCases[0]?.ticketNo ? [initialCases[0].ticketNo] : []);
   const [importHistory, setImportHistory] = useState<ImportHistoryEntry[]>(initialBrowserState?.importHistory ?? []);
   const [priceMaster, setPriceMaster] = useState<PriceMasterItem[]>(initialBrowserState?.priceMaster ?? []);
   const [priceMasterFileName, setPriceMasterFileName] = useState(initialBrowserState?.priceMasterFileName ?? "");
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
-  const [lastImportName, setLastImportName] = useState("");
-  const [persistence, setPersistence] = useState<{ status: PersistenceStatus; message: string }>({
-    status: "idle",
-    message: "Supabase save will run after CSV import when environment variables are configured."
-  });
-  const [query, setQuery] = useState("");
+  const [ticketQuery, setTicketQuery] = useState(initialCases[0]?.ticketNo ?? "");
+  const [priceQuery, setPriceQuery] = useState("");
+  const [activeDocument, setActiveDocument] = useState<ActiveDocument>("jobDetail");
+  const [quotationNo, setQuotationNo] = useState("");
+  const [poNo, setPoNo] = useState("");
+  const [documentDate, setDocumentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manualItems, setManualItems] = useState<PrintableItem[]>([]);
+  const [removedJobDetailRowIds, setRemovedJobDetailRowIds] = useState<string[]>([]);
+  const [priceTargetTicketNo, setPriceTargetTicketNo] = useState(initialCases[0]?.ticketNo ?? "");
 
   const selectedCase = cases.find((item) => item.ticketNo === selectedTicket) ?? cases[0];
-  const filteredCases = useMemo(() => {
-    const needle = query.trim().toLowerCase();
+  const jobDetailCases = useMemo(() => {
+    const orderedTicketNos = [selectedTicket, ...jobDetailTicketNos.filter((ticketNo) => ticketNo !== selectedTicket)];
+    return orderedTicketNos
+      .map((ticketNo) => cases.find((item) => item.ticketNo === ticketNo))
+      .filter((item): item is MaintenanceCase => Boolean(item));
+  }, [cases, jobDetailTicketNos, selectedTicket]);
+  const selectedDetail = selectedCase ? getCaseDetail(selectedCase) : null;
+  const packet = selectedCase ? getCasePacket(selectedCase.appWork) : null;
+  const printableItems = useMemo(() => [
+    ...buildPrintableItems(selectedCase, packet?.items ?? []),
+    ...manualItems
+  ], [manualItems, packet, selectedCase]);
+  const subtotal = printableItems.reduce((sum, item) => sum + item.lineTotal, 0);
+  const vat = roundMoney(subtotal * 0.07);
+  const grandTotal = roundMoney(subtotal + vat);
+
+  const matchingTickets = useMemo(() => {
+    const needle = ticketQuery.trim().toLowerCase();
     if (!needle) {
-      return cases;
+      return cases.slice(0, 8);
     }
     return cases.filter((item) => {
       const haystack = [
@@ -73,54 +75,23 @@ export default function App() {
         item.larkSnapshot.storeCode,
         item.larkSnapshot.storeName,
         item.larkSnapshot.category,
-        item.larkSnapshot.senior,
         item.larkSnapshot.supplier,
-        item.larkSnapshot.status
+        item.larkSnapshot.quotationNo,
+        item.larkSnapshot.poNo
       ].join(" ").toLowerCase();
       return haystack.includes(needle);
-    });
-  }, [cases, query]);
+    }).slice(0, 8);
+  }, [cases, ticketQuery]);
+
+  const priceMatches = useMemo(() => searchPriceMasterItems(priceMaster, priceQuery, 8), [priceMaster, priceQuery]);
 
   useEffect(() => {
-    const client = getSupabaseClient();
-    if (!client) {
+    if (!selectedCase) {
       return;
     }
-    const activeClient = client;
-
-    let cancelled = false;
-
-    async function loadFromSupabase() {
-      try {
-        await ensureSupabaseSession(activeClient);
-        const persistedCases = await loadPersistedCases(activeClient);
-        if (cancelled || persistedCases.length === 0) {
-          return;
-        }
-
-        setCases(persistedCases);
-        setSelectedTicket(persistedCases[0].ticketNo);
-        setPersistence({
-          status: "saved",
-          message: `Loaded ${persistedCases.length.toLocaleString()} cases from Supabase.`
-        });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setPersistence({
-          status: "error",
-          message: error instanceof Error ? error.message : "Could not load persisted cases from Supabase."
-        });
-      }
-    }
-
-    void loadFromSupabase();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    setQuotationNo(selectedCase.larkSnapshot.quotationNo || "CNQC-2026-QT-DRAFT");
+    setPoNo(selectedCase.larkSnapshot.poNo || "POM-DRAFT");
+  }, [selectedCase?.ticketNo]);
 
   async function handleCsvUpload(file: File) {
     const csvText = await file.text();
@@ -130,235 +101,148 @@ export default function App() {
     const nextHistory = [historyEntry, ...importHistory].slice(0, 20);
     setCases(result.cases);
     setImportHistory(nextHistory);
-    setImportResult(result);
-    setLastImportName(file.name);
     saveLocalState(result.cases, nextHistory, priceMaster, priceMasterFileName);
-    void persistImport(file.name, result, historyEntry.id, nextHistory);
-    if (result.newCases[0]) {
-      setSelectedTicket(result.newCases[0].ticketNo);
-    } else if (result.updatedCases[0]) {
-      setSelectedTicket(result.updatedCases[0].ticketNo);
-    }
+    const nextTicket = result.newCases[0]?.ticketNo ?? result.updatedCases[0]?.ticketNo ?? result.cases[0]?.ticketNo ?? "";
+    setSelectedTicket(nextTicket);
+    setJobDetailTicketNos(nextTicket ? [nextTicket] : []);
+    setTicketQuery(nextTicket);
   }
 
   async function handlePriceMasterUpload(file: File) {
-    try {
-      const items = await readPriceMasterFile(file);
-      setPriceMaster(items);
-      setPriceMasterFileName(file.name);
-      saveLocalState(cases, importHistory, items, file.name);
-      setPersistence({
-        status: "not_configured",
-        message: `Imported ${items.length.toLocaleString()} price master rows locally.`
-      });
-    } catch (error) {
-      setPersistence({
-        status: "error",
-        message: error instanceof Error ? `Could not import price master: ${error.message}` : "Could not import price master."
-      });
-    }
+    const items = await readPriceMasterFile(file);
+    setPriceMaster(items);
+    setPriceMasterFileName(file.name);
+    saveLocalState(cases, importHistory, items, file.name);
   }
 
-  async function persistImport(
-    fileName: string,
-    result: ImportResult,
-    historyEntryId: string,
-    currentHistory: ImportHistoryEntry[]
-  ) {
-    const client = getSupabaseClient();
-    if (!client) {
-      setPersistence({
-        status: "not_configured",
-        message: "Local preview only. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to save import history."
-      });
+  function handleSelectTicket(ticketNo: string) {
+    setSelectedTicket(ticketNo);
+    setJobDetailTicketNos([ticketNo]);
+    setTicketQuery(ticketNo);
+    setManualItems([]);
+    setRemovedJobDetailRowIds([]);
+    setPriceTargetTicketNo(ticketNo);
+  }
+
+  function handleAddJobDetailTicket(ticketNo: string) {
+    setJobDetailTicketNos((current) => current.includes(ticketNo) ? current : [...current, ticketNo]);
+    setPriceTargetTicketNo(ticketNo);
+  }
+
+  function handleRemoveJobDetailTicket(ticketNo: string) {
+    if (ticketNo === selectedTicket) {
       return;
     }
-
-    setPersistence({ status: "saving", message: "Saving ticket snapshots and import history to Supabase..." });
-
-    try {
-      await ensureSupabaseSession(client);
-      const batchId = await saveImportResult(client, fileName, result);
-      const syncedHistory = currentHistory.map((entry) => entry.id === historyEntryId
-        ? { ...entry, id: batchId, storageStatus: "supabase" as const }
-        : entry);
-      setImportHistory(syncedHistory);
-      saveLocalState(result.cases, syncedHistory, priceMaster, priceMasterFileName);
-      setPersistence({ status: "saved", message: `Saved to Supabase import batch ${batchId}.` });
-    } catch (error) {
-      const failedHistory = currentHistory.map((entry) => entry.id === historyEntryId
-        ? { ...entry, storageStatus: "error" as const }
-        : entry);
-      setImportHistory(failedHistory);
-      saveLocalState(result.cases, failedHistory, priceMaster, priceMasterFileName);
-      setPersistence({
-        status: "error",
-        message: error instanceof Error ? error.message : "Could not save import history to Supabase."
-      });
+    setJobDetailTicketNos((current) => current.filter((item) => item !== ticketNo));
+    setRemovedJobDetailRowIds((current) => current.filter((rowId) => !rowId.startsWith(`${ticketNo}::`)));
+    if (priceTargetTicketNo === ticketNo) {
+      setPriceTargetTicketNo(selectedTicket);
     }
   }
 
-  function handleDocumentStatusChange(documentKey: DocumentKey, status: DocumentStatus) {
+  function handleAddPriceItem(item: PriceMasterItem) {
+    const targetTicketNo = priceTargetTicketNo || selectedTicket;
+    setManualItems((current) => [
+      ...current,
+      {
+        id: `price-${targetTicketNo}-${Date.now()}-${current.length + 1}`,
+        ticketNo: targetTicketNo,
+        description: item.description,
+        quantity: item.quantity || 1,
+        unit: item.unit || "job",
+        unitPrice: item.totalPrice,
+        lineTotal: roundMoney((item.quantity || 1) * item.totalPrice),
+        isPacketItem: true,
+        source: "price"
+      }
+    ]);
+    setPriceQuery("");
+  }
+
+  function handleQuantityChange(itemId: string, quantity: number) {
     if (!selectedCase) {
       return;
     }
-
-    const nextCases = updateDocumentStatus(cases, selectedCase.ticketNo, documentKey, status);
-    setCases(nextCases);
-    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
-    setPersistence({
-      status: "not_configured",
-      message: `Saved ${selectedCase.ticketNo} ${documentKey} status locally.`
-    });
-  }
-
-  function handleAmountCheckChange(status: AmountCheckStatus) {
-    if (!selectedCase) {
+    if (manualItems.some((item) => item.id === itemId)) {
+      setManualItems((current) => current.map((item) => item.id === itemId
+        ? { ...item, quantity, lineTotal: roundMoney(quantity * item.unitPrice) }
+        : item));
       return;
     }
-
-    const nextCases = updateAmountCheck(cases, selectedCase.ticketNo, status);
-    setCases(nextCases);
-    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
-    setPersistence({
-      status: "not_configured",
-      message: `Saved ${selectedCase.ticketNo} amount validation status locally.`
-    });
-  }
-
-  function handleAddCaseNote(note: string) {
-    if (!selectedCase) {
-      return;
-    }
-
-    const nextCases = addCaseNote(cases, selectedCase.ticketNo, note);
-    if (nextCases === cases) {
-      return;
-    }
-
-    setCases(nextCases);
-    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
-    setPersistence({
-      status: "not_configured",
-      message: `Saved note for ${selectedCase.ticketNo} locally.`
-    });
-  }
-
-  function handleAddPriceMasterItem(item: PriceMasterItem) {
-    if (!selectedCase) {
-      return;
-    }
-
-    const nextCases = addPriceMasterItemToCasePacket(cases, selectedCase.ticketNo, item);
-    setCases(nextCases);
-    saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
-    setPersistence({
-      status: "not_configured",
-      message: `Added ${item.diyCode} to ${selectedCase.ticketNo} workspace locally.`
-    });
-  }
-
-  function handlePacketQuantityChange(itemId: string, quantity: number) {
-    if (!selectedCase) {
-      return;
-    }
-
     const nextCases = updateCasePacketItemQuantity(cases, selectedCase.ticketNo, itemId, quantity);
     setCases(nextCases);
     saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
-    setPersistence({
-      status: "not_configured",
-      message: `Updated ${selectedCase.ticketNo} workspace quantity locally.`
-    });
   }
 
-  async function handleDocumentFileAttach(documentKey: DocumentKey, file: File) {
-    if (!selectedCase) {
+  function handleRemoveItem(itemId: string) {
+    if (itemId === "draft-ticket-line" || !selectedCase) {
+      return;
+    }
+    if (manualItems.some((item) => item.id === itemId)) {
+      setManualItems((current) => current.filter((item) => item.id !== itemId));
+      setRemovedJobDetailRowIds((current) => current.filter((rowId) => !rowId.endsWith(`::${itemId}`)));
       return;
     }
 
-    let nextCases = attachDocumentFile(cases, selectedCase.ticketNo, documentKey, {
-      name: file.name,
-      size: file.size,
-      type: file.type || "application/octet-stream"
+    const nextCases = cases.map((item) => {
+      if (item.ticketNo !== selectedCase.ticketNo) {
+        return item;
+      }
+      const currentPacket = getCasePacket(item.appWork);
+      return {
+        ...item,
+        updatedAt: new Date().toISOString(),
+        appWork: {
+          ...item.appWork,
+          casePacket: recalculateCasePacket({
+            ...currentPacket,
+            items: currentPacket.items.filter((packetItem) => packetItem.id !== itemId)
+          })
+        }
+      };
     });
-
-    let message = `Attached ${file.name} to ${selectedCase.ticketNo} locally.`;
-
-    if (documentKey === "po") {
-      try {
-        const summary = await readPoFileSummary(file);
-        const validation = validatePoSummary(getCaseDetail(selectedCase).beforeVatAmount, summary);
-        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, validation.status);
-        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, `PO validation: ${validation.message}`);
-        message = `Attached PO and ${validation.status === "passed" ? "validated" : "flagged"}: ${validation.message}`;
-      } catch (error) {
-        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, "warning");
-        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, "PO validation: Could not read PO Excel file.");
-        message = error instanceof Error ? `Attached PO, but Excel validation failed: ${error.message}` : "Attached PO, but Excel validation failed.";
-      }
-    }
-
-    if (documentKey === "quotation") {
-      try {
-        const summary = await readQuotationFileSummary(file);
-        const validation = validateQuotationSummary(
-          selectedCase.larkSnapshot.quotationNo,
-          getCaseDetail(selectedCase).beforeVatAmount,
-          summary
-        );
-        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, validation.status);
-        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, `Quotation validation: ${validation.message}`);
-        message = `Attached quotation and ${validation.status === "passed" ? "validated" : "flagged"}: ${validation.message}`;
-      } catch (error) {
-        nextCases = updateAmountCheck(nextCases, selectedCase.ticketNo, "warning");
-        nextCases = addCaseNote(nextCases, selectedCase.ticketNo, "Quotation validation: Could not read quotation Excel file.");
-        message = error instanceof Error ? `Attached quotation, but Excel validation failed: ${error.message}` : "Attached quotation, but Excel validation failed.";
-      }
-    }
-
     setCases(nextCases);
+    setRemovedJobDetailRowIds((current) => current.filter((rowId) => !rowId.endsWith(`::${itemId}`)));
     saveLocalState(nextCases, importHistory, priceMaster, priceMasterFileName);
-    setPersistence({
-      status: "not_configured",
-      message
-    });
+  }
+
+  function handleRemoveJobDetailRow(rowId: string) {
+    setRemovedJobDetailRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
+  }
+
+  function handleAddManualItem(item: ManualItemDraft) {
+    const safeQuantity = Math.max(0, item.quantity);
+    const safeUnitPrice = Math.max(0, item.unitPrice);
+    setManualItems((current) => [
+      ...current,
+      {
+        id: `manual-${Date.now()}-${current.length + 1}`,
+        description: item.description,
+        quantity: safeQuantity,
+        unit: item.unit || "job",
+        unitPrice: safeUnitPrice,
+        lineTotal: roundMoney(safeQuantity * safeUnitPrice),
+        isPacketItem: true,
+        source: "manual"
+      }
+    ]);
+  }
+
+  if (!selectedCase || !selectedDetail || !packet) {
+    return <main className="empty-state">Import Lark CSV to start the workbook.</main>;
   }
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">M</div>
-          <div>
-            <strong>Maintenance Control</strong>
-            <span>MR.D.I.Y. Thailand</span>
-          </div>
+    <main className="workbook-app">
+      <aside className="workbook-tools" aria-label="Workbook controls">
+        <div className="brand-block">
+          <strong>MR.D.I.Y.</strong>
+          <span>Maintenance Workbook</span>
         </div>
 
-        <nav className="nav-list" aria-label="Primary">
-          <a className="nav-item active" href="#cases"><ClipboardCheck size={18} /> Cases</a>
-          <a className="nav-item" href="#documents"><FileText size={18} /> Documents</a>
-          <a className="nav-item" href="#prices"><Database size={18} /> Price Master</a>
-          <a className="nav-item" href="#archive"><Archive size={18} /> Archive</a>
-          <a className="nav-item" href="#history"><History size={18} /> Import History</a>
-        </nav>
-
-        <div className="source-box">
-          <span>Lark source</span>
-          <strong>MTD Table CSV</strong>
-          <small>Snapshot update only. App document work is preserved.</small>
-        </div>
-      </aside>
-
-      <main className="workspace">
-        <header className="topbar">
-          <div>
-            <h1>Maintenance Case Workbench</h1>
-            <p>Lark Ticket to Job Detail, Quotation, PO, Invoice and archive control.</p>
-          </div>
+        <section className="tool-section">
           <label className="upload-button">
-            <Upload size={18} />
+            <Upload size={17} />
             Import Lark CSV
             <input
               accept=".csv,text/csv"
@@ -372,165 +256,639 @@ export default function App() {
               }}
             />
           </label>
-        </header>
-
-        <section className="import-strip" aria-label="Import status">
-          <Metric label="New" value={importResult?.newCases.length ?? 0} tone="green" />
-          <Metric label="Updated" value={importResult?.updatedCases.length ?? 0} tone="blue" />
-          <Metric label="Unchanged" value={importResult?.unchangedCases.length ?? cases.length} tone="gray" />
-          <Metric label="Conflicts" value={importResult?.conflicts.length ?? 0} tone="amber" />
-          <Metric label="Invalid rows" value={importResult?.invalidRows.length ?? 0} tone="red" />
+          <label className="secondary-button">
+            <FileSpreadsheet size={16} />
+            Import Price Master
+            <input
+              accept=".xlsx,.xls"
+              type="file"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                  void handlePriceMasterUpload(file);
+                }
+                event.target.value = "";
+              }}
+            />
+          </label>
+          <span className="tool-note">{cases.length.toLocaleString()} tickets loaded</span>
         </section>
 
-        <section className="import-summary" aria-label="Lark CSV compatibility">
-          <div>
-            <strong>{importResult ? "Lark CSV imported" : "Ready for Lark MTD Table CSV"}</strong>
-            <span>
-              {importResult
-                ? `${lastImportName} read ${getImportedRowCount(importResult).toLocaleString()} ticket rows.`
-                : "Supports exported headers: Ticket No., Store Code-Name, Store Code, Store Full Name, Quotation number and PO."}
-            </span>
+        <section className="tool-section">
+          <div className="field-label">Ticket</div>
+          <div className="search-input">
+            <Search size={16} />
+            <input value={ticketQuery} onChange={(event) => setTicketQuery(event.target.value)} placeholder="Type ticket no." />
           </div>
-          <FileSpreadsheet size={22} />
-        </section>
-
-        <section className={`persistence-banner persistence-${persistence.status}`} aria-label="Database save status">
-          <Database size={18} />
-          <span>{persistence.message}</span>
-        </section>
-
-        <section className="price-master-panel" id="prices">
-          <div className="section-head">
-            <div>
-              <h2>Price Master</h2>
-              <span>{priceMaster.length.toLocaleString()} standard price rows loaded{priceMasterFileName ? ` from ${priceMasterFileName}` : ""}</span>
-            </div>
-            <label className="secondary-upload">
-              <FileSpreadsheet size={16} />
-              Import Price Master
-              <input
-                accept=".xlsx,.xls"
-                type="file"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) {
-                    void handlePriceMasterUpload(file);
-                  }
-                  event.target.value = "";
-                }}
-              />
-            </label>
+          <div className="ticket-picks">
+            {matchingTickets.map((item) => (
+              <div
+                className={item.ticketNo === selectedCase.ticketNo ? "is-selected" : ""}
+                key={item.ticketNo}
+              >
+                <button className="ticket-open" type="button" onClick={() => handleSelectTicket(item.ticketNo)}>
+                  <strong>{item.ticketNo}</strong>
+                  <span>{item.larkSnapshot.storeCode} {item.larkSnapshot.storeName || ""}</span>
+                </button>
+                <button
+                  className="ticket-add"
+                  disabled={jobDetailTicketNos.includes(item.ticketNo)}
+                  type="button"
+                  onClick={() => handleAddJobDetailTicket(item.ticketNo)}
+                >
+                  {jobDetailTicketNos.includes(item.ticketNo) ? "Added" : "Add"}
+                </button>
+              </div>
+            ))}
           </div>
-          <div className="price-preview">
-            {priceMaster.length > 0 ? priceMaster.slice(0, 5).map((item) => (
-              <div className="price-row" key={`${item.sourceSheet}-${item.diyCode}-${item.description}`}>
+        </section>
+
+        <section className="tool-section">
+          <div className="field-label">Job Detail Tickets</div>
+          <div className="ticket-chips">
+            {jobDetailCases.map((item) => (
+              <button
+                className={item.ticketNo === selectedTicket ? "is-locked" : ""}
+                key={item.ticketNo}
+                type="button"
+                onClick={() => handleRemoveJobDetailTicket(item.ticketNo)}
+                title={item.ticketNo === selectedTicket ? "Main ticket" : "Remove from Job Detail"}
+              >
+                {item.ticketNo}
+              </button>
+            ))}
+          </div>
+          <div className="ticket-picks compact">
+            {matchingTickets
+              .filter((item) => !jobDetailTicketNos.includes(item.ticketNo))
+              .slice(0, 4)
+              .map((item) => (
+                <button key={`job-detail-${item.ticketNo}`} type="button" onClick={() => handleAddJobDetailTicket(item.ticketNo)}>
+                  <strong>Add {item.ticketNo}</strong>
+                  <span>{item.larkSnapshot.storeCode} {item.larkSnapshot.storeName || ""}</span>
+                </button>
+              ))}
+          </div>
+        </section>
+
+        <section className="tool-section">
+          <div className="field-label">Document Header</div>
+          <label className="plain-field">
+            <span>Quotation No.</span>
+            <input value={quotationNo} onChange={(event) => setQuotationNo(event.target.value)} />
+          </label>
+          <label className="plain-field">
+            <span>PO No.</span>
+            <input value={poNo} onChange={(event) => setPoNo(event.target.value)} />
+          </label>
+          <label className="plain-field">
+            <span>Date</span>
+            <input type="date" value={documentDate} onChange={(event) => setDocumentDate(event.target.value)} />
+          </label>
+        </section>
+
+        <section className="tool-section price-tool">
+          <div className="field-label">Price Master</div>
+          <label className="plain-field">
+            <span>Add to Ticket</span>
+            <select value={priceTargetTicketNo || selectedTicket} onChange={(event) => setPriceTargetTicketNo(event.target.value)}>
+              {jobDetailCases.map((item) => (
+                <option key={item.ticketNo} value={item.ticketNo}>
+                  {item.ticketNo} - {item.larkSnapshot.storeCode} {item.larkSnapshot.storeName || ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="search-input">
+            <Search size={16} />
+            <input
+              disabled={priceMaster.length === 0}
+              value={priceQuery}
+              onChange={(event) => setPriceQuery(event.target.value)}
+              placeholder={priceMaster.length ? "Search work item" : "Import price file first"}
+            />
+          </div>
+          <div className="price-picks">
+            {priceMatches.map((item) => (
+              <button key={`${item.sourceSheet}-${item.diyCode}-${item.description}`} type="button" onClick={() => handleAddPriceItem(item)}>
                 <strong>{item.diyCode}</strong>
                 <span>{item.description}</span>
-                <em>{item.totalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</em>
-              </div>
-            )) : (
-              <p className="muted history-empty">Import the 2026 standard price file to prepare quotation price matching.</p>
-            )}
+                <em>{formatMoney(item.totalPrice)}</em>
+              </button>
+            ))}
           </div>
+          <span className="tool-note">{priceMaster.length.toLocaleString()} rows {priceMasterFileName ? `from ${priceMasterFileName}` : ""}</span>
+        </section>
+      </aside>
+
+      <section className="workbook-stage">
+        <header className="workbook-header">
+          <div>
+            <h1>Full Workbook</h1>
+            <p>Ticket data, quotation lines and PO totals stay linked from the same workbook items.</p>
+          </div>
+          <button className="print-button" type="button" onClick={() => window.print()}>
+            <Printer size={18} />
+            Print
+          </button>
+        </header>
+
+        <nav className="document-tabs" aria-label="Workbook documents">
+          {documentTabs.map((tab) => (
+            <button
+              className={tab.key === activeDocument ? "is-active" : ""}
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveDocument(tab.key)}
+            >
+              <FileText size={16} />
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <section className="live-strip">
+          <div><span>Ticket</span><strong>{jobDetailCases.length > 1 ? `${jobDetailCases.length} tickets` : selectedCase.ticketNo}</strong></div>
+          <div><span>Store</span><strong>{selectedCase.larkSnapshot.storeCode} {selectedCase.larkSnapshot.storeName}</strong></div>
+          <div><span>Supplier</span><strong>{selectedCase.larkSnapshot.supplier || "CNQC"}</strong></div>
+          <div><span>QT Total</span><strong>{formatMoney(grandTotal)}</strong></div>
         </section>
 
-        <div className="content-grid">
-          <section className="case-list" id="cases">
-            <div className="section-head">
-              <div>
-                <h2>Case Queue</h2>
-                <span>{filteredCases.length} active cases</span>
-              </div>
-              <div className="search-box">
-                <Search size={16} />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search ticket, store, supplier"
-                />
-              </div>
-            </div>
-
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Ticket</th>
-                    <th>Store</th>
-                    <th>Category</th>
-                    <th>Senior</th>
-                    <th>Supplier</th>
-                    <th>Documents</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCases.map((item) => (
-                    <tr
-                      key={item.ticketNo}
-                      className={item.ticketNo === selectedCase.ticketNo ? "selected-row" : ""}
-                      onClick={() => setSelectedTicket(item.ticketNo)}
-                    >
-                      <td><strong>{item.ticketNo}</strong></td>
-                      <td>{item.larkSnapshot.storeCode} <span>{item.larkSnapshot.storeName}</span></td>
-                      <td>{item.larkSnapshot.category || "-"}</td>
-                      <td>{item.larkSnapshot.senior || "-"}</td>
-                      <td>{item.larkSnapshot.supplier || "Unassigned"}</td>
-                      <td><DocumentProgress item={item} /></td>
-                      <td><AmountBadge value={item.appWork.amountCheck} /></td>
-                      <td><StatusPill value={item.larkSnapshot.status || "Open"} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {selectedCase ? (
-            <CasePanel
-              item={selectedCase}
-              importResult={importResult}
-              onDocumentStatusChange={handleDocumentStatusChange}
-              onAmountCheckChange={handleAmountCheckChange}
-              onAddCaseNote={handleAddCaseNote}
-              onDocumentFileAttach={handleDocumentFileAttach}
-              priceMaster={priceMaster}
-              onAddPriceMasterItem={handleAddPriceMasterItem}
-              onPacketQuantityChange={handlePacketQuantityChange}
+        <section className="print-scroll">
+          {activeDocument === "jobDetail" ? (
+            <JobDetailSheet
+              jobDetailCases={jobDetailCases}
+              items={printableItems}
+              removedRowIds={removedJobDetailRowIds}
+              quotationNo={quotationNo}
+              documentDate={documentDate}
+              onQuantityChange={handleQuantityChange}
+              onRemoveItem={handleRemoveItem}
+              onRemoveRow={handleRemoveJobDetailRow}
+              onAddManualItem={handleAddManualItem}
             />
           ) : null}
-        </div>
-
-        <section className="history-panel" id="history">
-          <div className="section-head">
-            <div>
-              <h2>Import History</h2>
-              <span>{importHistory.length} recent imports saved in this browser</span>
-            </div>
-          </div>
-          <div className="history-list">
-            {importHistory.length > 0 ? importHistory.map((entry) => (
-              <div className="history-row" key={`${entry.id}-${entry.importedAt}`}>
-                <div>
-                  <strong>{entry.fileName}</strong>
-                  <span>{formatDateTime(entry.importedAt)}</span>
-                </div>
-                <HistoryMetric label="Rows" value={entry.totalRows} />
-                <HistoryMetric label="New" value={entry.newCount} />
-                <HistoryMetric label="Updated" value={entry.updatedCount} />
-                <HistoryMetric label="Conflicts" value={entry.conflictCount} />
-                <HistoryMetric label="Invalid" value={entry.invalidCount} />
-                <span className={`storage-pill storage-${entry.storageStatus}`}>{entry.storageStatus}</span>
-              </div>
-            )) : (
-              <p className="muted history-empty">No CSV import has been saved yet.</p>
-            )}
-          </div>
+          {activeDocument === "quotation" ? (
+            <QuotationSheet
+              caseItem={selectedCase}
+              jobDetailCases={jobDetailCases}
+              items={printableItems}
+              removedRowIds={removedJobDetailRowIds}
+              quotationNo={quotationNo}
+              poNo={poNo}
+              documentDate={documentDate}
+              subtotal={subtotal}
+              vat={vat}
+              grandTotal={grandTotal}
+              onQuantityChange={handleQuantityChange}
+              onRemoveItem={handleRemoveItem}
+            />
+          ) : null}
+          {activeDocument === "po" ? (
+            <PoSheet
+              caseItem={selectedCase}
+              detail={selectedDetail}
+              items={printableItems}
+              quotationNo={quotationNo}
+              poNo={poNo}
+              documentDate={documentDate}
+              subtotal={subtotal}
+              vat={vat}
+              grandTotal={grandTotal}
+              onQuantityChange={handleQuantityChange}
+              onRemoveItem={handleRemoveItem}
+            />
+          ) : null}
         </section>
-      </main>
+      </section>
+    </main>
+  );
+}
+
+function JobDetailSheet({
+  jobDetailCases,
+  items,
+  removedRowIds,
+  quotationNo,
+  documentDate,
+  onQuantityChange,
+  onRemoveItem,
+  onRemoveRow,
+  onAddManualItem
+}: {
+  jobDetailCases: MaintenanceCase[];
+  items: PrintableItem[];
+  removedRowIds: string[];
+  quotationNo: string;
+  documentDate: string;
+  onQuantityChange: (itemId: string, quantity: number) => void;
+  onRemoveItem: (itemId: string) => void;
+  onRemoveRow: (rowId: string) => void;
+  onAddManualItem: (item: ManualItemDraft) => void;
+}) {
+  const rows = jobDetailCases.flatMap((caseItem) => {
+    const detail = getCaseDetail(caseItem);
+    return items.filter((item) => !item.ticketNo || item.ticketNo === caseItem.ticketNo).map((item) => ({
+      id: getDocumentRowId(caseItem.ticketNo, item.id),
+      itemId: item.id,
+      ticketNo: caseItem.ticketNo,
+      code: `${caseItem.larkSnapshot.storeCode} ${caseItem.larkSnapshot.storeName || ""}`.trim(),
+      openedAt: formatShortDate(caseItem.larkSnapshot.createdDate),
+      request: item.source === "manual" ? item.description : detail.branchRequest || caseItem.larkSnapshot.category || "-",
+      solution: item.source === "manual" ? "" : item.description,
+      amount: item.lineTotal
+    }));
+  }).filter((row) => !removedRowIds.includes(row.id));
+
+  return (
+    <article className="sheet sheet-job">
+      <div className="sheet-meta">MTD-2023-004 Rev.02 <span>วันที่ {formatThaiDate(documentDate)}</span></div>
+      <h2>JOB DETAIL</h2>
+      <div className="reference-line">เลขที่เอกสารอ้างอิง <strong>{quotationNo}</strong></div>
+      <table className="print-table job-table">
+        <thead>
+          <tr>
+            <th>ลำดับ</th>
+            <th>Ticket</th>
+            <th>CODE</th>
+            <th>วันที่เปิด</th>
+            <th>รายละเอียด</th>
+            <th>แนวทางการแก้ไข</th>
+            <th>ราคา</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={row.id}>
+              <td>{index + 1}</td>
+              <td>{row.ticketNo}</td>
+              <td>{row.code}</td>
+              <td>{row.openedAt}</td>
+              <td>{row.request}</td>
+              <td>{row.solution}</td>
+              <td className="money">{formatMoney(row.amount)}</td>
+              <td className="no-print row-action-cell">
+                <button type="button" onClick={() => onRemoveRow(row.id)}>RE</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <ManualLineForm onAddManualItem={onAddManualItem} />
+      <EditableLineItems items={items} onQuantityChange={onQuantityChange} onRemoveItem={onRemoveItem} />
+      <SignatureRow labels={["Prepared by", "Checked by"]} />
+    </article>
+  );
+}
+
+function QuotationSheet({
+  caseItem,
+  jobDetailCases,
+  items,
+  removedRowIds,
+  quotationNo,
+  poNo,
+  documentDate,
+  subtotal,
+  vat,
+  grandTotal,
+  onQuantityChange,
+  onRemoveItem
+}: {
+  caseItem: MaintenanceCase;
+  jobDetailCases: MaintenanceCase[];
+  items: PrintableItem[];
+  removedRowIds: string[];
+  quotationNo: string;
+  poNo: string;
+  documentDate: string;
+  subtotal: number;
+  vat: number;
+  grandTotal: number;
+  onQuantityChange: (itemId: string, quantity: number) => void;
+  onRemoveItem: (itemId: string) => void;
+}) {
+  const rows = jobDetailCases.flatMap((jobCase) => items.filter((item) => !item.ticketNo || item.ticketNo === jobCase.ticketNo).map((item) => ({
+    id: getDocumentRowId(jobCase.ticketNo, item.id),
+    ticketNo: jobCase.ticketNo,
+    store: `${jobCase.larkSnapshot.storeCode} ${jobCase.larkSnapshot.storeName || ""}`.trim(),
+    description: item.description,
+    quantity: item.quantity,
+    unit: item.unit,
+    unitPrice: item.unitPrice,
+    lineTotal: item.lineTotal
+  }))).filter((item) => !removedRowIds.includes(item.id));
+  const quotationSubtotal = roundMoney(rows.reduce((sum, item) => sum + item.lineTotal, 0));
+  const quotationVat = roundMoney(quotationSubtotal * 0.07);
+  const quotationGrandTotal = roundMoney(quotationSubtotal + quotationVat);
+
+  return (
+    <article className="sheet sheet-quotation">
+      <header className="supplier-head">
+        <img src={cnqcLogo} alt="CNQC Qingjian" />
+        <div>
+          <strong>Qingjian International (Thailand) Co.,Ltd.</strong>
+          <span>288/36 The Best Kingkeaw 19 Moo 12 Rachatewa Bangpri Samutprakan 10540</span>
+          <span>Tel: +66 803620407 &nbsp; Tax ID: 0105559166757</span>
+        </div>
+      </header>
+      <div className="quote-title">Quotation</div>
+      <div className="quote-grid">
+        <div><strong>ATTENTION:</strong> MR.D.I.Y. Maintenance Team</div>
+        <div><strong>NO.:</strong> {quotationNo}</div>
+        <div><strong>CUSTOMER NAME:</strong> MR.D.I.Y.(BANGKOK) COMPANY LIMITED. (Head office)</div>
+        <div><strong>DATE:</strong> {formatSlashDate(documentDate)}</div>
+        <div><strong>ADD.:</strong> 889,889/1 Moo 3, Phraeksa Mai, Samut Prakan 10280</div>
+        <div><strong>PO NO.:</strong> {poNo}</div>
+        <div><strong>TICKET:</strong> {jobDetailCases.map((item) => item.ticketNo).join(", ") || caseItem.ticketNo}</div>
+      </div>
+      <table className="print-table quotation-table">
+        <thead>
+          <tr>
+            <th>No.</th>
+            <th>Ticket</th>
+            <th>Branch</th>
+            <th>Description</th>
+            <th>Qty</th>
+            <th>Unit</th>
+            <th>Unit Price</th>
+            <th>Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((item, index) => (
+            <tr key={item.id}>
+              <td>{index + 1}</td>
+              <td>{item.ticketNo}</td>
+              <td>{item.store}</td>
+              <td>{item.description}</td>
+              <td>{item.quantity}</td>
+              <td>{item.unit}</td>
+              <td className="money">{formatMoney(item.unitPrice)}</td>
+              <td className="money">{formatMoney(item.lineTotal)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <TotalsBox subtotal={quotationSubtotal || subtotal} vat={quotationSubtotal ? quotationVat : vat} grandTotal={quotationSubtotal ? quotationGrandTotal : grandTotal} />
+      <EditableLineItems items={items} onQuantityChange={onQuantityChange} onRemoveItem={onRemoveItem} />
+      <SignatureRow labels={["ผู้เสนอราคา", "Checked by", "Authorized signature"]} />
+    </article>
+  );
+}
+
+function PoSheet({
+  caseItem,
+  detail,
+  items,
+  quotationNo,
+  poNo,
+  documentDate,
+  subtotal,
+  vat,
+  grandTotal,
+  onQuantityChange,
+  onRemoveItem
+}: {
+  caseItem: MaintenanceCase;
+  detail: ReturnType<typeof getCaseDetail>;
+  items: PrintableItem[];
+  quotationNo: string;
+  poNo: string;
+  documentDate: string;
+  subtotal: number;
+  vat: number;
+  grandTotal: number;
+  onQuantityChange: (itemId: string, quantity: number) => void;
+  onRemoveItem: (itemId: string) => void;
+}) {
+  return (
+    <article className="sheet sheet-po">
+      <header className="po-head po-head-bank">
+        <div className="logo-box logo-image-box">
+          <img src={mrDiyLogo} alt="MR.D.I.Y. Always Low Prices" />
+        </div>
+        <div className="po-company">
+          <strong>MR. D.I.Y. TRADING (THAILAND) CO., LTD.</strong>
+          <span>889, 889/1 Moo 3, Praksamai, Muang Samutprakarn, Samutprakarn 10280</span>
+          <span>Head Office (Co.No.: 0105558162511)</span>
+        </div>
+        <div className="po-title-box">
+          <h2>ใบสั่งซื้อ</h2>
+          <span>PURCHASE ORDER</span>
+        </div>
+      </header>
+      <section className="po-bank-grid">
+        <div className="po-field po-supplier"><strong>ผู้ขายสินค้า / Suppliers</strong><span>:</span><em>{caseItem.larkSnapshot.supplier || "CNQC"}</em></div>
+        <div className="po-field"><strong>เลขที่/No.</strong><span>:</span><em>{poNo}</em></div>
+        <div className="po-field po-supplier"><strong>สถานที่ส่งของ</strong><span>:</span><em>{caseItem.larkSnapshot.storeCode} {caseItem.larkSnapshot.storeName}</em></div>
+        <div className="po-field"><strong>วันที่/Date</strong><span>:</span><em>{formatThaiDate(documentDate)}</em></div>
+        <div className="po-field po-supplier"><strong>ที่อยู่</strong><span>:</span><em>{detail.mapUrl || "-"}</em></div>
+        <div className="po-field"><strong>S/O</strong><span>:</span><em>Credit 30 days</em></div>
+        <div className="po-field po-supplier"><strong>เบอร์โทร</strong><span>:</span><em>{detail.phoneNumber || "Maintenance Team"}</em></div>
+        <div className="po-field"><strong>Budget</strong><span>:</span><em>Non Budget</em></div>
+        <div className="po-field po-full"><strong>อ้างอิง QT / รายละเอียดงาน</strong><span>:</span><em>{quotationNo} / Ticket {caseItem.ticketNo} / {detail.branchRequest || caseItem.larkSnapshot.category || "-"}</em></div>
+      </section>
+      <table className="print-table po-table">
+        <thead>
+          <tr>
+            <th>ลำดับ</th>
+            <th>รายการ</th>
+            <th>จำนวน</th>
+            <th>หน่วย</th>
+            <th>ราคาต่อหน่วย</th>
+            <th>จำนวนเงิน</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, index) => (
+            <tr key={item.id}>
+              <td>{index + 1}</td>
+              <td>{item.description}</td>
+              <td>{item.quantity}</td>
+              <td>{item.unit}</td>
+              <td className="money">{formatMoney(item.unitPrice)}</td>
+              <td className="money">{formatMoney(item.lineTotal)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <TotalsBox subtotal={subtotal} vat={vat} grandTotal={grandTotal} />
+      <EditableLineItems items={items} onQuantityChange={onQuantityChange} onRemoveItem={onRemoveItem} />
+      <SignatureRow labels={["Create", "Check", "Approve"]} />
+    </article>
+  );
+}
+
+function EditableLineItems({
+  items,
+  onQuantityChange,
+  onRemoveItem
+}: {
+  items: PrintableItem[];
+  onQuantityChange: (itemId: string, quantity: number) => void;
+  onRemoveItem: (itemId: string) => void;
+}) {
+  const editableItems = items.filter((item) => item.isPacketItem);
+  if (editableItems.length === 0) {
+    return <p className="sheet-hint">Add a price master item to make quantity editable across all three documents.</p>;
+  }
+
+  return (
+    <div className="line-editor no-print">
+      {editableItems.map((item) => (
+        <label key={item.id}>
+          <span>{item.description}</span>
+          <input min="0" step="0.01" type="number" value={item.quantity} onChange={(event) => onQuantityChange(item.id, Number(event.target.value))} />
+          <button type="button" onClick={() => onRemoveItem(item.id)}>Remove</button>
+        </label>
+      ))}
     </div>
   );
+}
+
+function TotalsBox({ subtotal, vat, grandTotal }: { subtotal: number; vat: number; grandTotal: number }) {
+  return (
+    <div className="totals-box">
+      <div><span>Subtotal</span><strong>{formatMoney(subtotal)}</strong></div>
+      <div><span>VAT 7%</span><strong>{formatMoney(vat)}</strong></div>
+      <div><span>Grand Total</span><strong>{formatMoney(grandTotal)}</strong></div>
+    </div>
+  );
+}
+
+type ManualItemDraft = {
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+};
+
+function ManualLineForm({ onAddManualItem }: { onAddManualItem: (item: ManualItemDraft) => void }) {
+  const [description, setDescription] = useState("");
+  const [quantity, setQuantity] = useState(1);
+  const [unit, setUnit] = useState("job");
+  const [unitPrice, setUnitPrice] = useState(0);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextDescription = description.trim();
+    if (!nextDescription) {
+      return;
+    }
+    onAddManualItem({ description: nextDescription, quantity, unit, unitPrice });
+    setDescription("");
+    setQuantity(1);
+    setUnit("job");
+    setUnitPrice(0);
+  }
+
+  return (
+    <form className="manual-line-form no-print" onSubmit={handleSubmit}>
+      <strong>Add manual Job Detail item</strong>
+      <input
+        aria-label="Manual item description"
+        value={description}
+        onChange={(event) => setDescription(event.target.value)}
+        placeholder="รายละเอียดงาน"
+      />
+      <input
+        aria-label="Manual item quantity"
+        min="0"
+        step="0.01"
+        type="number"
+        value={quantity}
+        onChange={(event) => setQuantity(Number(event.target.value))}
+      />
+      <input
+        aria-label="Manual item unit"
+        value={unit}
+        onChange={(event) => setUnit(event.target.value)}
+        placeholder="Unit"
+      />
+      <input
+        aria-label="Manual item unit price"
+        min="0"
+        step="0.01"
+        type="number"
+        value={unitPrice}
+        onChange={(event) => setUnitPrice(Number(event.target.value))}
+      />
+      <button type="submit">Add</button>
+    </form>
+  );
+}
+
+function SignatureRow({ labels }: { labels: string[] }) {
+  return (
+    <div className="signature-row" style={{ gridTemplateColumns: `repeat(${labels.length}, 1fr)` }}>
+      {labels.map((label) => (
+        <div key={label}>
+          <span />
+          <strong>{label}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type PrintableItem = {
+  id: string;
+  ticketNo?: string;
+  description: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  lineTotal: number;
+  isPacketItem: boolean;
+  source: "draft" | "packet" | "manual" | "price";
+};
+
+function buildPrintableItems(caseItem: MaintenanceCase | undefined, packetItems: CasePacketItem[]): PrintableItem[] {
+  if (packetItems.length > 0) {
+    return packetItems.map((item) => ({
+      id: item.id,
+      description: item.description,
+      quantity: item.quantity,
+      unit: item.unit || "job",
+      unitPrice: item.materialUnitPrice + item.laborUnitPrice,
+      lineTotal: item.lineTotal,
+      isPacketItem: true,
+      source: "packet"
+    }));
+  }
+
+  const amount = caseItem ? parseMoney(getCaseDetail(caseItem).beforeVatAmount) : 0;
+  return [{
+    id: "draft-ticket-line",
+    description: caseItem?.larkSnapshot.category || getCaseDetail(caseItem as MaintenanceCase).maintenanceScope || "Maintenance work from Lark ticket",
+    quantity: 1,
+    unit: "job",
+    unitPrice: amount || 0,
+    lineTotal: amount || 0,
+    isPacketItem: false,
+    source: "draft"
+  }];
+}
+
+function recalculateCasePacket(packet: CasePacket): CasePacket {
+  const items = packet.items.map((item) => ({
+    ...item,
+    lineTotal: roundMoney(item.quantity * (item.materialUnitPrice + item.laborUnitPrice))
+  }));
+  const subtotal = roundMoney(items.reduce((sum, item) => sum + item.lineTotal, 0));
+  const vat = roundMoney(subtotal * 0.07);
+  return {
+    ...packet,
+    items,
+    subtotal,
+    vat,
+    grandTotal: roundMoney(subtotal + vat)
+  };
+}
+
+function getDocumentRowId(ticketNo: string, itemId: string): string {
+  return `${ticketNo}::${itemId}`;
 }
 
 function getInitialBrowserState() {
@@ -552,428 +910,36 @@ function saveLocalState(
   saveBrowserState(window.localStorage, { cases, importHistory, priceMaster, priceMasterFileName });
 }
 
-function getImportedRowCount(result: ImportResult): number {
-  return result.newCases.length
-    + result.updatedCases.length
-    + result.unchangedCases.length
-    + result.invalidRows.length;
+function formatMoney(value: number): string {
+  return value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone: "green" | "blue" | "gray" | "amber" | "red" }) {
-  return (
-    <div className={`metric metric-${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function HistoryMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="history-metric">
-      <span>{label}</span>
-      <strong>{value.toLocaleString()}</strong>
-    </div>
-  );
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat("en-GB", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
-}
-
-function CasePanel({
-  item,
-  importResult,
-  onDocumentStatusChange,
-  onAmountCheckChange,
-  onAddCaseNote,
-  onDocumentFileAttach,
-  priceMaster,
-  onAddPriceMasterItem,
-  onPacketQuantityChange
-}: {
-  item: MaintenanceCase;
-  importResult: ImportResult | null;
-  onDocumentStatusChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
-  onAmountCheckChange: (status: AmountCheckStatus) => void;
-  onAddCaseNote: (note: string) => void;
-  onDocumentFileAttach: (documentKey: DocumentKey, file: File) => void;
-  priceMaster: PriceMasterItem[];
-  onAddPriceMasterItem: (item: PriceMasterItem) => void;
-  onPacketQuantityChange: (itemId: string, quantity: number) => void;
-}) {
-  const conflicts = importResult?.conflicts.filter((conflict) => conflict.ticketNo === item.ticketNo) ?? [];
-  const changes = importResult?.changes.filter((change) => change.ticketNo === item.ticketNo) ?? [];
-  const detail = getCaseDetail(item);
-  const packet = getCasePacket(item.appWork);
-
-  return (
-    <aside className="case-panel">
-      <div className="panel-title">
-        <div>
-          <span>Selected Case</span>
-          <h2>{item.ticketNo}</h2>
-        </div>
-        <ChevronRight size={20} />
-      </div>
-
-      <dl className="case-facts">
-        <div><dt>Store</dt><dd>{item.larkSnapshot.storeCode} {item.larkSnapshot.storeName}</dd></div>
-        <div><dt>Supplier</dt><dd>{item.larkSnapshot.supplier || "Unassigned"}</dd></div>
-        <div><dt>Quotation</dt><dd>{item.larkSnapshot.quotationNo || "Waiting"}</dd></div>
-        <div><dt>PO</dt><dd>{item.larkSnapshot.poNo || "Not created"}</dd></div>
-      </dl>
-
-      <section className="panel-section">
-        <h3>Lark Ticket Detail</h3>
-        <div className="detail-stack">
-          <DetailBlock label="Branch request" value={detail.branchRequest} large />
-          <DetailBlock label="Maintenance scope" value={detail.maintenanceScope} large />
-          <div className="detail-grid">
-            <DetailBlock label="Sup category" value={detail.supplierCategory} />
-            <DetailBlock label="Rank" value={detail.rank} />
-            <DetailBlock label="Job done by" value={detail.jobDoneBy} />
-            <DetailBlock label="Contractor status" value={detail.contractorStatus} />
-            <DetailBlock label="SLA days" value={detail.slaDays} />
-            <DetailBlock label="Plan date" value={detail.plannedAt} />
-            <DetailBlock label="Due date" value={detail.dueAt} />
-            <DetailBlock label="Finish date" value={detail.finishedAt} />
-            <DetailBlock label="Phone" value={detail.phoneNumber} />
-            <DetailBlock label="PO status" value={detail.poStatus} />
-            <DetailBlock label="Before VAT" value={formatAmount(detail.beforeVatAmount)} />
-            <DetailBlock label="Map" value={detail.mapUrl} href={detail.mapUrl} />
-          </div>
-        </div>
-      </section>
-
-      <section className="panel-section" id="documents">
-        <h3>Document Workspace</h3>
-        <DocumentWorkspace
-          packet={packet}
-          priceMaster={priceMaster}
-          onAddPriceMasterItem={onAddPriceMasterItem}
-          onQuantityChange={onPacketQuantityChange}
-        />
-      </section>
-
-      <section className="panel-section">
-        <h3>Legacy File Check</h3>
-        <div className="checklist">
-          {documentLabels.map(({ key, label }) => (
-            <ChecklistRow
-              key={key}
-              documentKey={key}
-              label={label}
-              status={item.appWork[key]}
-              files={item.appWork.documents?.[key] ?? []}
-              onChange={onDocumentStatusChange}
-              onFileAttach={onDocumentFileAttach}
-            />
-          ))}
-        </div>
-      </section>
-
-      <section className="panel-section">
-        <h3>Validation</h3>
-        <label className="validation-control">
-          <span>Amount validation</span>
-          <select
-            aria-label="Amount validation status"
-            value={item.appWork.amountCheck}
-            onChange={(event) => onAmountCheckChange(event.target.value as AmountCheckStatus)}
-          >
-            {amountCheckOptions.map((option) => (
-              <option key={option} value={option}>{option.replace("_", " ")}</option>
-            ))}
-          </select>
-        </label>
-        <div className="validation-stack">
-          <ValidationItem label="Quotation total" status={item.appWork.amountCheck === "blocked" ? "blocked" : item.appWork.amountCheck === "passed" ? "passed" : "review"} />
-          <ValidationItem label="VAT 7%" status={item.appWork.amountCheck === "blocked" ? "blocked" : "passed"} />
-          <ValidationItem label="Price master match" status={item.appWork.amountCheck === "blocked" ? "blocked" : item.appWork.amountCheck === "warning" ? "review" : "passed"} />
-        </div>
-      </section>
-
-      <CaseNotes notes={item.appWork.notes} onAddCaseNote={onAddCaseNote} />
-
-      <section className="panel-section">
-        <h3>Latest CSV Changes</h3>
-        {conflicts.length > 0 ? (
-          <div className="alert-list">
-            {conflicts.map((conflict) => (
-              <div className="alert-row" key={conflict.reason}><AlertTriangle size={16} /> {conflict.reason}</div>
-            ))}
-          </div>
-        ) : changes.length > 0 ? (
-          <div className="change-list">
-            {changes.slice(0, 4).map((change) => (
-              <div key={`${change.field}-${change.after}`}>
-                <strong>{change.field}</strong>
-                <span>{change.before || "-"} to {change.after || "-"}</span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">No changes from the latest import.</p>
-        )}
-      </section>
-    </aside>
-  );
-}
-
-function DocumentWorkspace({
-  packet,
-  priceMaster,
-  onAddPriceMasterItem,
-  onQuantityChange
-}: {
-  packet: CasePacket;
-  priceMaster: PriceMasterItem[];
-  onAddPriceMasterItem: (item: PriceMasterItem) => void;
-  onQuantityChange: (itemId: string, quantity: number) => void;
-}) {
-  const [priceQuery, setPriceQuery] = useState("");
-  const selectableItems = useMemo(() => searchPriceMasterItems(priceMaster, priceQuery, 12), [priceMaster, priceQuery]);
-  const readiness = useMemo(() => getPacketDocumentReadiness(packet), [packet]);
-
-  return (
-    <div className="workspace-panel">
-      <div className="workspace-actions">
-        <input
-          aria-label="Search price master"
-          disabled={priceMaster.length === 0}
-          placeholder={priceMaster.length > 0 ? "Search code, description, sheet" : "Import Price Master first"}
-          value={priceQuery}
-          onChange={(event) => setPriceQuery(event.target.value)}
-        />
-        <div className="price-search-list">
-          {selectableItems.length > 0 ? selectableItems.map((item) => (
-            <button
-              key={getPriceMasterOptionValue(item)}
-              type="button"
-              onClick={() => {
-                onAddPriceMasterItem(item);
-                setPriceQuery("");
-              }}
-            >
-              <strong>{item.diyCode}</strong>
-              <span>{item.description}</span>
-              <em>{item.totalPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</em>
-            </button>
-          )) : (
-            <p className="muted">No matching price master item.</p>
-          )}
-        </div>
-      </div>
-
-      <div className="document-readiness">
-        {readiness.map((item) => (
-          <div className={`readiness-card readiness-${item.status}`} key={item.label}>
-            <strong>{item.label}</strong>
-            <span>{item.message}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="packet-table">
-        {packet.items.length > 0 ? packet.items.map((item) => (
-          <div className="packet-row" key={item.id}>
-            <strong>{item.priceMasterCode ?? "Manual"}</strong>
-            <span>{item.description}</span>
-            <input
-              aria-label={`Quantity for ${item.description}`}
-              min="0"
-              step="0.01"
-              type="number"
-              value={item.quantity}
-              onChange={(event) => onQuantityChange(item.id, Number(event.target.value))}
-            />
-            <em>{item.lineTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</em>
-          </div>
-        )) : (
-          <p className="muted history-empty">Add work items from Price Master to build Job Detail, Quotation and PO from the same data.</p>
-        )}
-      </div>
-
-      <div className="packet-total">
-        <span>Subtotal {packet.subtotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-        <span>VAT {packet.vat.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-        <strong>Total {packet.grandTotal.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-      </div>
-    </div>
-  );
-}
-
-function getPriceMasterOptionValue(item: PriceMasterItem): string {
-  return `${item.sourceSheet}-${item.diyCode}-${item.description}`;
-}
-
-function DetailBlock({
-  label,
-  value,
-  href,
-  large = false
-}: {
-  label: string;
-  value: string;
-  href?: string;
-  large?: boolean;
-}) {
-  const displayValue = value || "-";
-  return (
-    <div className={large ? "detail-block detail-block-large" : "detail-block"}>
-      <span>{label}</span>
-      {href ? (
-        <a href={href} target="_blank" rel="noreferrer">{displayValue}</a>
-      ) : (
-        <strong>{displayValue}</strong>
-      )}
-    </div>
-  );
-}
-
-function formatAmount(value: string): string {
+function parseMoney(value: string): number {
   const amount = Number(value.replace(/,/g, ""));
-  if (!Number.isFinite(amount) || !value) {
-    return value;
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function formatShortDate(value?: string): string {
+  if (!value) {
+    return "-";
   }
-  return amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return value.slice(0, 10);
 }
 
-function ChecklistRow({
-  documentKey,
-  label,
-  status,
-  files,
-  onChange,
-  onFileAttach
-}: {
-  documentKey: DocumentKey;
-  label: string;
-  status: DocumentStatus;
-  files: NonNullable<MaintenanceCase["appWork"]["documents"][DocumentKey]>;
-  onChange: (documentKey: DocumentKey, status: DocumentStatus) => void;
-  onFileAttach: (documentKey: DocumentKey, file: File) => void;
-}) {
-  const done = status === "validated" || status === "approved";
-  return (
-    <div className="check-row">
-      <div className="check-main">
-        {done ? <CheckCircle2 size={18} /> : status === "missing" ? <XCircle size={18} /> : <FileCheck2 size={18} />}
-        <span>{label}</span>
-        <select
-          aria-label={`${label} status`}
-          value={status}
-          onChange={(event) => onChange(documentKey, event.target.value as DocumentStatus)}
-        >
-          {documentStatusOptions.map((option) => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
-      </div>
-      <div className="file-row">
-        <label className="file-attach">
-          Attach
-          <input
-            aria-label={`Attach ${label} file`}
-            type="file"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) {
-                onFileAttach(documentKey, file);
-              }
-              event.target.value = "";
-            }}
-          />
-        </label>
-        <span>{files[0] ? `${files[0].name} (${formatFileSize(files[0].size)})` : "No file attached"}</span>
-      </div>
-    </div>
-  );
-}
-
-function formatFileSize(size: number): string {
-  if (size < 1024) {
-    return `${size} B`;
+function formatThaiDate(value: string): string {
+  if (!value) {
+    return "-";
   }
-  if (size < 1024 * 1024) {
-    return `${(size / 1024).toFixed(1)} KB`;
+  return new Intl.DateTimeFormat("th-TH", { dateStyle: "medium" }).format(new Date(value));
+}
+
+function formatSlashDate(value: string): string {
+  if (!value) {
+    return "-";
   }
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function ValidationItem({ label, status }: { label: string; status: "passed" | "review" | "blocked" }) {
-  const Icon = status === "passed" ? CheckCircle2 : status === "blocked" ? XCircle : AlertTriangle;
-  return (
-    <div className={`validation-item validation-${status}`}>
-      <Icon size={18} />
-      <span>{label}</span>
-      <strong>{status}</strong>
-    </div>
-  );
-}
-
-function CaseNotes({
-  notes,
-  onAddCaseNote
-}: {
-  notes: string[];
-  onAddCaseNote: (note: string) => void;
-}) {
-  const [draft, setDraft] = useState("");
-
-  function submitNote(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const nextNote = draft.trim();
-    if (!nextNote) {
-      return;
-    }
-    onAddCaseNote(nextNote);
-    setDraft("");
-  }
-
-  return (
-    <section className="panel-section">
-      <h3>Case Notes</h3>
-      <form className="note-form" onSubmit={submitNote}>
-        <input
-          aria-label="New case note"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Add follow-up note"
-        />
-        <button type="submit">Add</button>
-      </form>
-      <div className="note-list">
-        {notes.length > 0 ? notes.map((note, index) => (
-          <div className="note-row" key={`${note}-${index}`}>{note}</div>
-        )) : (
-          <p className="muted">No notes yet.</p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function DocumentProgress({ item }: { item: MaintenanceCase }) {
-  const values = documentLabels.map(({ key }) => item.appWork[key]);
-  const complete = values.filter((status) => status === "validated" || status === "approved").length;
-  return (
-    <div className="progress-cell">
-      <div className="progress-track"><span style={{ width: `${(complete / values.length) * 100}%` }} /></div>
-      <small>{complete}/{values.length}</small>
-    </div>
-  );
-}
-
-function StatusPill({ value }: { value: string }) {
-  return <span className="status-pill">{value}</span>;
-}
-
-function AmountBadge({ value }: { value: MaintenanceCase["appWork"]["amountCheck"] }) {
-  const label = value.replace("_", " ");
-  return <span className={`amount-badge amount-${value}`}>{label}</span>;
+  return value.replaceAll("-", "/");
 }
